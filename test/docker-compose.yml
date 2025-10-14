@@ -1,0 +1,30 @@
+services:
+  greenmail:
+    image: greenmail/standalone:latest
+    container_name: greenmail
+    # Map the mail ports to your local machine.
+    # The local ports (e.g., 1993) are kept consistent with the previous setup
+    # for easier client configuration. The container ports (e.g., 3993) are
+    # GreenMail's defaults.
+    ports:
+      # SMTP (non-SSL) -> local:container
+      - "1025:3025"
+      # IMAP (non-SSL) -> local:container
+      - "1143:3143"
+      # IMAP over SSL (IMAPS) -> local:container
+      - "1993:3993"
+      # SMTP over SSL (SMTPS) -> local:container
+      - "1587:3465"
+      # GreenMail Web UI
+      - "8080:8080"
+    environment:
+      # Pass Java options to configure GreenMail.
+      # -Dgreenmail.setup.test.all enables all protocols with SSL/TLS.
+      # -Dgreenmail.auth.disabled automatically creates users on first login (no password check)
+      # -Dgreenmail.hostname=0.0.0.0 allows external connections
+      - >
+        GREENMAIL_OPTS=
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.auth.disabled
+        -Dgreenmail.hostname=0.0.0.0
+    restart: unless-stopped
