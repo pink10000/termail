@@ -14,6 +14,11 @@ You can send an email to the Greenmail server via
 python3 test/test_send_mail.py
 ```
 
+and test fetching the top email using
+```bash 
+cargo run -- --cli --backend Greenmail fetch-inbox
+```
+
 # acknowledgement
 
 as part of UCSD's CSE 291Y
