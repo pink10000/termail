@@ -23,6 +23,9 @@ pub enum Error {
     
     /// Generic error with message
     Other(String),
+
+    /// Config error
+    Config(String),
 }
 
 impl fmt::Display for Error {
@@ -35,6 +38,7 @@ impl fmt::Display for Error {
             Error::Connection(msg) => write!(f, "Connection error: {}", msg),
             Error::Authentication(msg) => write!(f, "Authentication error: {}", msg),
             Error::Parse(msg) => write!(f, "Parse error: {}", msg),
+            Error::Config(msg) => write!(f, "Config error: {}", msg),
             Error::Other(msg) => write!(f, "{}", msg),
         }
     }

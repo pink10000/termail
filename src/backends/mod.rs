@@ -25,9 +25,12 @@ pub trait Backend {
     fn fetch_inbox_top_n(&self, n: usize) -> Result<Vec<String>, Error>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BackendType {
+    #[serde(rename = "greenmail")]
     GreenMail,
+    #[serde(rename = "gmail")]
     Gmail,
 }
 

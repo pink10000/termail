@@ -7,3 +7,5 @@ edition = "2021"
 clap = { version = "4.5.49", features = ["derive"] }
 imap = "2.4.1"
 native-tls = "0.2.14"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.9.8"
