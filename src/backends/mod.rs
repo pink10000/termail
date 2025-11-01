@@ -2,8 +2,7 @@ extern crate imap;
 
 pub mod greenmail;
 pub mod gmail;
-pub mod error;
-pub use error::Error;
+use crate::error::Error;
 
 use std::fmt;
 use clap::Subcommand;

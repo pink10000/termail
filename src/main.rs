@@ -1,5 +1,6 @@
 pub mod imap_client;
 pub mod backends;
+pub mod error;
 
 use clap::Parser;
 use backends::{BackendType, Backend, Command};
