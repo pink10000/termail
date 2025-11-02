@@ -13,3 +13,4 @@ ssl = true
 host = "imap.gmail.com"
 port = 993
 ssl = true
+oauth2_client_secret_file = "./client_secret.json"

@@ -7,7 +7,7 @@ use crate::config::BackendConfig;
 pub struct GreenmailBackend {
     host: String,
     port: u16,
-    ssl: bool,
+    _ssl: bool, // TODO: remove this once we have a proper SSL implementation
     credentials: Credentials,
 }
 
@@ -19,7 +19,7 @@ impl GreenmailBackend {
         Self {
             host: config.host.clone(),
             port: config.port,
-            ssl: config.ssl,
+            _ssl: config.ssl,
             credentials,
         }
     }

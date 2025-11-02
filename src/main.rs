@@ -59,5 +59,5 @@ fn main() {
         }
     };
 
-    println!("{}", result);
+    println!("RESULT:\n{}", result);
 }
