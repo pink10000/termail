@@ -26,6 +26,9 @@ impl GreenmailBackend {
 }
 
 impl Backend for GreenmailBackend {
+    fn needs_oauth(&self) -> bool {
+        false 
+    }
 
     /// This function needs to get manually updated as we implement more 
     /// features for the backend.
@@ -89,7 +92,7 @@ impl Backend for GreenmailBackend {
             .expect("message was not valid utf-8")
             .to_string();
     
-        // be nice to the server and log out
+        // be nice to the server and log out``
         imap_session.logout()?;
     
         Ok(Some(body))

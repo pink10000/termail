@@ -5,8 +5,12 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.49", features = ["derive"] }
-google-gmail1 = "6.0.0"
+google-gmail1 = { version = "6.0.0", features = ["yup-oauth2"] }
+google-apis-common = "7.0.0"
+hyper = "1.7.0"
 imap = "2.4.1"
 native-tls = "0.2.14"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.9.8"
+tokio = { version = "1", features = ["full"] }

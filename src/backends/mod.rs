@@ -20,6 +20,16 @@ pub enum Command {
 }
 
 pub trait Backend {
+    fn needs_oauth(&self) -> bool {
+        false
+    }
+
+    /// Perform authentication (if needed). This is a sync wrapper that may spawn async tasks.
+    /// Returns Ok(()) if authentication succeeded or wasn't needed.
+    fn authenticate(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn check_command_support(&self, cmd: &Command) -> Result<bool, Error>;
     fn do_command(&self, cmd: Command) -> Result<Option<String>, Error>;
     fn fetch_inbox_top(&self) -> Result<Option<String>, Error>;
@@ -35,8 +45,6 @@ pub enum BackendType {
     Gmail,
 }
 
-// The trait std::str::FromStr is part of Rust stdlib to convert a string to a type.
-// The cli parser `clap` uses this to trait to parse the backend.
 impl std::str::FromStr for BackendType {
     type Err = String;
     
@@ -60,19 +68,19 @@ impl fmt::Display for BackendType {
 }
 
 impl BackendType {
+    /// Check if this backend type requires OAuth2 authentication
+    pub fn needs_oauth(&self) -> bool {
+        match self {
+            BackendType::GreenMail => false,
+            BackendType::Gmail => true,
+        }
+    }
+
     /// Get a trait object for this backend, initialized with its configuration
     pub fn get_backend(&self, config: &BackendConfig) -> Box<dyn Backend> {
         match self {
             BackendType::GreenMail => Box::new(greenmail::GreenmailBackend::new(config)),
             BackendType::Gmail => Box::new(gmail::GmailBackend::new(config)),
-        }
-    }
-
-    /// Check if this backend needs OAuth2 authentication
-    pub fn needs_oauth(&self) -> bool {
-        match self {
-            BackendType::GreenMail => false,
-            BackendType::Gmail => true,
         }
     }
 }

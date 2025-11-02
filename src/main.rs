@@ -30,14 +30,24 @@ pub struct Args {
 
 fn main() {
     let args = Args::parse();
-    let mut config = Config::load(args.config_file.clone());
+    let mut config = Config::load(args.config_file.clone()).unwrap();
     config.merge(&args);
 
     if !config.termail.cli {
         unimplemented!("tui mode not implemented yet");
     }
 
-    let backend: Box<dyn Backend> = config.get_backend();
+    let backend_type = config.termail.default_backend;
+    let mut backend: Box<dyn Backend> = config.get_backend();
+    
+    if backend_type.needs_oauth() {
+        if let Err(e) = backend.authenticate() {
+            eprintln!("Authentication failed: {}", e);
+            std::process::exit(1);
+        }
+        
+        println!("Authentication successful!");
+    }
     
     // Execute the command using the selected backend
     let result = match backend.do_command(args.command) {

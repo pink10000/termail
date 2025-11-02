@@ -40,7 +40,7 @@ impl Config {
     /// 2. The current directory
     /// 3. `~/.config/termail/config.toml`
     /// 4. `/etc/termail/config.toml`
-    pub fn load(config_file_path: Option<PathBuf>) -> Self {
+    pub fn load(config_file_path: Option<PathBuf>) -> Result<Self, Error> {
         let config_file = match config_file_path {
             Some(p) => fs::read_to_string(p)
                 .map_err(|e| Error::Config(e.to_string())),
@@ -50,16 +50,27 @@ impl Config {
                 .map_err(|e| Error::Config(e.to_string())),
         };
 
-        let config: Result<Config, Error> = toml::from_str(config_file.unwrap().as_str())
-            .map_err(|e| Error::Config(e.to_string()));
+        let config: Config = toml::from_str(config_file.unwrap().as_str())
+            .map_err(|e| Error::Config(e.to_string()))
+            .unwrap();
         
-        match config {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error loading config: {}", e);
-                std::process::exit(1);
+        // Validate backend configurations
+        for (be_type, be_config) in config.backends.clone().into_iter() {
+            match be_type {
+                BackendType::GreenMail => {
+                    if be_config.oauth2_client_secret_file != None {
+                        Error::Config("Greenmail does not support OAuth2. Remove it from your config.".to_string());
+                    }
+                },
+                BackendType::Gmail => {
+                    if be_config.oauth2_client_secret_file == None {
+                        Error::Config("Gmail requires OAuth2.".to_string());
+                    }
+                },
             }
         }
+        Ok(config)
+
     }
 
     pub fn merge(&mut self, args: &Args) -> &mut Self {
@@ -86,5 +97,4 @@ impl Config {
     pub fn get_backend_config(&self, backend_type: &BackendType) -> Option<&BackendConfig> {
         self.backends.get(backend_type)
     }
-
 }
