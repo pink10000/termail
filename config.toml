@@ -4,14 +4,12 @@ cli = true
 default_backend = "greenmail"
 
 [backends.greenmail]
-auth_provider = "config-file"
-auth_credentials = { username = "user1", password = "password123"}
+auth_credentials = { username = "user1@example.com", password = "password123"}
 host = "127.0.0.1"
 port = 1993
 ssl = true
 
 [backends.gmail]
-auth_provider = "oauth2"
 host = "imap.gmail.com"
 port = 993
 ssl = true

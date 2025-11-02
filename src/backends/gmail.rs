@@ -1,6 +1,23 @@
 use super::{Backend, Command, Error};
+use crate::config::BackendConfig;
 
-pub struct GmailBackend;
+pub struct GmailBackend {
+    host: String,
+    port: u16,
+    ssl: bool,
+    oauth2_client_secret_file: Option<String>,
+}
+
+impl GmailBackend {
+    pub fn new(config: &BackendConfig) -> Self {
+        Self {
+            host: config.host.clone(),
+            port: config.port,
+            ssl: config.ssl,
+            oauth2_client_secret_file: config.oauth2_client_secret_file.clone(),
+        }
+    }
+}
 
 impl Backend for GmailBackend {
     fn check_command_support(&self, _cmd: &Command) -> Result<bool, Error> {

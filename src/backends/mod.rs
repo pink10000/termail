@@ -3,6 +3,7 @@ extern crate imap;
 pub mod greenmail;
 pub mod gmail;
 use crate::error::Error;
+use crate::config::BackendConfig;
 
 use std::fmt;
 use clap::Subcommand;
@@ -59,11 +60,19 @@ impl fmt::Display for BackendType {
 }
 
 impl BackendType {
-    /// Get a trait object for this backend
-    pub fn get_backend(&self) -> Box<dyn Backend> {
+    /// Get a trait object for this backend, initialized with its configuration
+    pub fn get_backend(&self, config: &BackendConfig) -> Box<dyn Backend> {
         match self {
-            BackendType::GreenMail => Box::new(greenmail::GreenmailBackend),
-            BackendType::Gmail => Box::new(gmail::GmailBackend),
+            BackendType::GreenMail => Box::new(greenmail::GreenmailBackend::new(config)),
+            BackendType::Gmail => Box::new(gmail::GmailBackend::new(config)),
+        }
+    }
+
+    /// Check if this backend needs OAuth2 authentication
+    pub fn needs_oauth(&self) -> bool {
+        match self {
+            BackendType::GreenMail => false,
+            BackendType::Gmail => true,
         }
     }
 }

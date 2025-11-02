@@ -4,7 +4,7 @@ pub mod error;
 pub mod config;
 pub mod auth;
 
-use clap::Parser;
+use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend, Command};
 use config::Config;
 use std::path::PathBuf;
@@ -12,12 +12,12 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Use cli mode instead of tui
-    #[arg(long, action)]
+    #[arg(long, action = ArgAction::SetTrue)]
     cli: bool,
 
     /// Use a specific email backend (available: greenmail, gmail)
     #[arg(long, value_parser = clap::value_parser!(BackendType))]
-    backend: BackendType,
+    backend: Option<BackendType>,
 
     /// The command to execute
     #[command(subcommand)]
@@ -37,7 +37,7 @@ fn main() {
         unimplemented!("tui mode not implemented yet");
     }
 
-    let backend: Box<dyn Backend> = config.termail.default_backend.get_backend();
+    let backend: Box<dyn Backend> = config.get_backend();
     
     // Execute the command using the selected backend
     let result = match backend.do_command(args.command) {

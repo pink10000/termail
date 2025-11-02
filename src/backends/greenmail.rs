@@ -1,8 +1,29 @@
 extern crate imap;
 
 use super::{Backend, Command, Error};
+use crate::auth::Credentials;
+use crate::config::BackendConfig;
 
-pub struct GreenmailBackend;
+pub struct GreenmailBackend {
+    host: String,
+    port: u16,
+    ssl: bool,
+    credentials: Credentials,
+}
+
+impl GreenmailBackend {
+    pub fn new(config: &BackendConfig) -> Self {
+        let credentials = config.auth_credentials.clone()
+            .expect("Greenmail backend requires credentials in configuration");
+        
+        Self {
+            host: config.host.clone(),
+            port: config.port,
+            ssl: config.ssl,
+            credentials,
+        }
+    }
+}
 
 impl Backend for GreenmailBackend {
 
@@ -30,7 +51,7 @@ impl Backend for GreenmailBackend {
     }
 
     fn fetch_inbox_top(&self) -> Result<Option<String>, Error> {
-        let domain = "127.0.0.1";
+        let domain = self.host.as_str();
         
         // For local testing with self-signed certificates, we need to accept invalid certs
         // while still maintaining TLS encryption
@@ -42,12 +63,12 @@ impl Backend for GreenmailBackend {
     
         // we pass in the domain twice to check that the server's TLS
         // certificate is valid for the domain we're connecting to.
-        let client = imap::connect((domain, 1993), domain, &tls).unwrap();
+        let client = imap::connect((domain, self.port), domain, &tls).unwrap();
     
         // the client we have here is unauthenticated.
         // to do anything useful with the e-mails, we need to log in
         let mut imap_session = client
-            .login("user1@example.com", "password123")
+            .login(&self.credentials.username, &self.credentials.password)
             .map_err(|e| e.0)?;
     
         // we want to fetch the first email in the INBOX mailbox

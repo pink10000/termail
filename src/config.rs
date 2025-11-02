@@ -4,7 +4,8 @@
 
 use crate::error::Error;
 use crate::backends::BackendType;
-use crate::auth::{AuthProvider, Credentials};
+use crate::auth::{Credentials};
+use crate::backends::Backend;
 use crate::Args;
 
 use std::collections::HashMap;
@@ -19,12 +20,11 @@ pub struct TermailConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BackendConfig {
-    pub backend_type: BackendType,
-    auth_provider: AuthProvider,
-    auth_credentials: Option<Credentials>,
-    host: String,
-    port: u16,
-    ssl: bool,
+    pub auth_credentials: Option<Credentials>,
+    pub host: String,
+    pub port: u16,
+    pub ssl: bool,
+    pub oauth2_client_secret_file: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -52,7 +52,8 @@ impl Config {
 
         let config: Result<Config, Error> = toml::from_str(config_file.unwrap().as_str())
             .map_err(|e| Error::Config(e.to_string()));
-        return match config {
+        
+        match config {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error loading config: {}", e);
@@ -62,8 +63,28 @@ impl Config {
     }
 
     pub fn merge(&mut self, args: &Args) -> &mut Self {
-        self.termail.cli = args.cli;
+        // If --cli flag was passed, override config
+        if args.cli {
+            self.termail.cli = true;
+        }
+        // If --backend was specified, override config
+        if let Some(backend) = args.backend {
+            self.termail.default_backend = backend;
+        }
         self
+    }
+
+    pub fn get_backend(&self) -> Box<dyn Backend> {
+        let selected_backend = self.termail.default_backend;
+        
+        let backend_config = self.backends.get(&selected_backend)
+            .expect(&format!("No configuration found for backend '{}'", selected_backend));
+        
+        selected_backend.get_backend(backend_config)
+    }
+
+    pub fn get_backend_config(&self, backend_type: &BackendType) -> Option<&BackendConfig> {
+        self.backends.get(backend_type)
     }
 
 }

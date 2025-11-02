@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.49", features = ["derive"] }
+google-gmail1 = "6.0.0"
 imap = "2.4.1"
 native-tls = "0.2.14"
 serde = { version = "1.0.228", features = ["derive"] }
