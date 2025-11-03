@@ -47,8 +47,6 @@ fn main() {
             eprintln!("Authentication failed: {}", e);
             std::process::exit(1);
         }
-        
-        println!("Authentication successful!");
     }
     
     // Execute the command using the selected backend
@@ -58,9 +56,6 @@ fn main() {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
-    };
-
-    // TODO: print result in a pretty way
-    
+    };    
     println!("RESULT:\n{}", result);
 }

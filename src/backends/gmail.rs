@@ -32,6 +32,8 @@ impl GmailBackend {
             .map_err(|e| Error::Config(format!("Failed to read OAuth2 secret file: {}", e)))?;
 
         // Set up the OAuth2 authenticator with installed flow (opens browser)
+        // TODO: use a better way to get the scopes
+        // Should be defined in the config file maybe?
         let scopes = &[
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.addons.current.message.readonly"
@@ -79,8 +81,6 @@ impl GmailBackend {
         
         for message in messages {
             let message_id = message.id.as_ref().unwrap();
-            println!("Fetching message: {}", message_id);
-
             let message_response = self.hub.as_ref().unwrap()
                 .users()
                 .messages_get("me", message_id)
@@ -88,67 +88,62 @@ impl GmailBackend {
                 .doit()
                 .await
                 .map_err(|e| Error::Connection(format!("Failed to fetch message {}: {}", message_id, e)))?;
-            
-            let full_message: Message = message_response.1;
-            
-            if let Some(payload) = &full_message.payload {
-                if let Some(headers) = &payload.headers {
-                    let mut subject = String::new();
-                    let mut from = String::new();
-                    let mut to = String::new();
-                    let mut date = String::new();
-                    
-                    for header in headers {
-                        let name = header.name.as_ref().unwrap();
-                        let value = header.value.as_ref().unwrap();
+                        
+            let payload: google_gmail1::api::MessagePart = message_response.1.payload.unwrap();
+            let headers: Vec<google_gmail1::api::MessagePartHeader> = payload.headers.unwrap();
 
-                        match name.as_str() {
-                            "Subject" => subject = value.to_string(),
-                            "From" => from = value.to_string(),
-                            "To" => to = value.to_string(),
-                            "Date" => date = value.to_string(),
-                            _ => (),
-                        }
-                    }
+            // Helper function to extract header value by name
+            // this is probably not maintainable; but it's cool!
+            let get_header = |name: &str| -> String {
+                headers.iter()
+                    .find(|h| h.name.as_ref().map_or(false, |n| n == name))
+                    .and_then(|h| h.value.as_ref())
+                    .cloned()
+                    .unwrap_or_default()
+            };
 
-                    let mut body = String::new();
-                    let mut mime_type: MimeType = Default::default();
-                    
-                    // Extract body from parts
-                    if let Some(parts) = &payload.parts {
-                        for part in parts {
-                            if let Some(part_body) = &part.body {
-                                if let Some(data) = &part_body.data {
-                                    if let Ok(text) = std::str::from_utf8(data) {
-                                        body.push_str(text);
-                                    }
-                                }
-                            }
-                            
-                            // Determine mime type from part
-                            if let Some(part_mime_type) = &part.mime_type {
-                                if part_mime_type.contains("html") {
-                                    mime_type = MimeType::TextHtml;
-                                }
-                            }
-                        }
+            // Extract body and mime type from parts
+            let (body, mime_type) = if let Some(parts) = &payload.parts {
+                let mut body = String::new();
+                let mut mime_type = Default::default();
+                
+                for part in parts {
+                    if let Some(text) = part.body.as_ref()
+                        .and_then(|b| b.data.as_ref())
+                        .and_then(|data| std::str::from_utf8(data).ok())
+                    {
+                        body.push_str(text);
                     }
                     
-                    let email = EmailMessage {
-                        id: message_id.clone(),
-                        subject,
-                        from,
-                        to,
-                        date,
-                        body,
-                        mime_type,
-                    };
-                    
-                    emails.push(email);
+                    if let Some(part_mime) = &part.mime_type {
+                        if part_mime.contains("html") {
+                            mime_type = MimeType::TextHtml;
+                        }
+                    }
                 }
-            }
-        }
+                
+                (body, mime_type)
+            } else {
+                // fallback
+                println!("Fallback: Payload parts not recognized");
+                let body = payload.body.as_ref()
+                    .and_then(|b| b.data.as_ref())
+                    .and_then(|data| std::str::from_utf8(data).ok())
+                    .unwrap_or("")
+                    .to_string();
+                (body, MimeType::TextPlain)
+            };
 
+            emails.push(EmailMessage { 
+                id: message_id.to_string(), 
+                subject: get_header("Subject"),
+                from: get_header("From"),
+                to: get_header("To"),
+                date: get_header("Date"),
+                body,
+                mime_type,
+            });       
+        }
         Ok(emails)
     }
 }
