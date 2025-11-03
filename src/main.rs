@@ -1,4 +1,3 @@
-pub mod imap_client;
 pub mod backends;
 pub mod error;
 pub mod config;
