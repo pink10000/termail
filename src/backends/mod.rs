@@ -4,20 +4,9 @@ pub mod greenmail;
 pub mod gmail;
 use crate::error::Error;
 use crate::config::BackendConfig;
+use crate::types::{Command, CommandResult};
 
 use std::fmt;
-use clap::Subcommand;
-
-/// We implement CLI commands via clap subcommands and validate backend compatibility at runtime.
-#[derive(Subcommand, Debug)]
-pub enum Command {
-    
-    /// Fetch inbox
-    FetchInbox {
-        #[arg(short, long, default_value_t = 1)]
-        count: usize,
-    },
-}
 
 pub trait Backend {
     fn needs_oauth(&self) -> bool {
@@ -30,10 +19,8 @@ pub trait Backend {
         Ok(())
     }
 
-    fn check_command_support(&self, cmd: &Command) -> Result<bool, Error>;
-    fn do_command(&self, cmd: Command) -> Result<Option<String>, Error>;
-    fn fetch_inbox_top(&self) -> Result<Option<String>, Error>;
-    fn fetch_inbox_top_n(&self, n: usize) -> Result<Vec<String>, Error>;
+    /// Execute a command and return a structured result
+    fn do_command(&self, cmd: Command) -> Result<CommandResult, Error>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]

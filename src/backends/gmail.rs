@@ -1,5 +1,7 @@
-use super::{Backend, Command, Error};
+use super::{Backend, Error};
+use crate::types::Command;
 use crate::config::BackendConfig;
+use crate::types::{CommandResult, EmailMessage, MimeType};
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 
@@ -57,78 +59,97 @@ impl GmailBackend {
         Ok(())
     }
 
-    async fn fetch_inbox_top_async(&self) -> Result<Option<String>, Error> {
-        println!("Fetching inbox top");
+    async fn fetch_inbox_emails_async(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
         let result = self.hub.as_ref().unwrap()
             .users()
             .messages_list("me")
-            .max_results(1)
+            .max_results(count as u32)
             .doit()
             .await
-            .map_err(|e| Error::Connection(format!("Failed to fetch inbox top: {}", e)))?;
-        let messages: Vec<Message> = result.1.messages.unwrap();
+            .map_err(|e| Error::Connection(format!("Failed to fetch inbox: {}", e)))?;
+        
+        let messages: Vec<Message> = result.1.messages.unwrap_or_default();
 
-        // I think theres a better way to write this?
         if messages.is_empty() {
             println!("No Messages Found");
-            return Ok(None)
+            return Ok(Vec::new())
         }
         
-        let message_id = messages.first().unwrap().id.as_ref().unwrap();
-        println!("Message ID: {}", message_id);
-
-        let top_message_response = self.hub.as_ref().unwrap()
-            .users()
-            .messages_get("me", message_id)
-            .format("full")
-            .doit()
-            .await
-            .map_err(|e| Error::Connection(format!("Failed to fetch inbox top: {}", e)))?;
+        let mut emails = Vec::new();
         
-        let top_message: Message = top_message_response.1;
+        for message in messages {
+            let message_id = message.id.as_ref().unwrap();
+            println!("Fetching message: {}", message_id);
 
-        let mut output = String::new();
-                
-        if let Some(payload) = &top_message.payload {
-            if let Some(headers) = &payload.headers {
-                let mut subject = String::new();
-                let mut from = String::new();
-                let mut to = String::new();
-                let mut date = String::new();
-                
-                for header in headers {
-                    let name = header.name.as_ref().unwrap();
-                    let value = header.value.as_ref().unwrap();
+            let message_response = self.hub.as_ref().unwrap()
+                .users()
+                .messages_get("me", message_id)
+                .format("full")
+                .doit()
+                .await
+                .map_err(|e| Error::Connection(format!("Failed to fetch message {}: {}", message_id, e)))?;
+            
+            let full_message: Message = message_response.1;
+            
+            if let Some(payload) = &full_message.payload {
+                if let Some(headers) = &payload.headers {
+                    let mut subject = String::new();
+                    let mut from = String::new();
+                    let mut to = String::new();
+                    let mut date = String::new();
+                    
+                    for header in headers {
+                        let name = header.name.as_ref().unwrap();
+                        let value = header.value.as_ref().unwrap();
 
-                    match name.as_str() {
-                        "Subject" => subject = value.to_string(),
-                        "From" => from = value.to_string(),
-                        "To" => to = value.to_string(),
-                        "Date" => date = value.to_string(),
-                        _ => (),
-                    }
-                }
-
-                output.push_str(&format!("Subject: {}\n", subject));
-                output.push_str(&format!("From: {}\n", from));
-                output.push_str(&format!("To: {}\n", to));
-                output.push_str(&format!("Date: {}\n", date));
-
-                // need some kind of way to handle different mime types for email 
-                // not all emails are plain text
-
-                if let Some(parts) = &payload.parts {
-                    for part in parts {
-                        if let Some(body) = &part.body {
-                            let body_data = body.data.as_ref().unwrap();
-                            output.push_str(std::str::from_utf8(&body_data).unwrap());
+                        match name.as_str() {
+                            "Subject" => subject = value.to_string(),
+                            "From" => from = value.to_string(),
+                            "To" => to = value.to_string(),
+                            "Date" => date = value.to_string(),
+                            _ => (),
                         }
-                    }   
-                }   
+                    }
+
+                    let mut body = String::new();
+                    let mut mime_type: MimeType = Default::default();
+                    
+                    // Extract body from parts
+                    if let Some(parts) = &payload.parts {
+                        for part in parts {
+                            if let Some(part_body) = &part.body {
+                                if let Some(data) = &part_body.data {
+                                    if let Ok(text) = std::str::from_utf8(data) {
+                                        body.push_str(text);
+                                    }
+                                }
+                            }
+                            
+                            // Determine mime type from part
+                            if let Some(part_mime_type) = &part.mime_type {
+                                if part_mime_type.contains("html") {
+                                    mime_type = MimeType::TextHtml;
+                                }
+                            }
+                        }
+                    }
+                    
+                    let email = EmailMessage {
+                        id: message_id.clone(),
+                        subject,
+                        from,
+                        to,
+                        date,
+                        body,
+                        mime_type,
+                    };
+                    
+                    emails.push(email);
+                }
             }
         }
 
-        Ok(Some(output))
+        Ok(emails)
     }
 }
 
@@ -144,40 +165,29 @@ impl Backend for GmailBackend {
         rt.block_on(self.authenticate_async())
     }
 
-    fn check_command_support(&self, cmd: &Command) -> Result<bool, Error> {
-        match cmd {
-            Command::FetchInbox { count } => Ok(*count > 0),
-            _ => Ok(false),
-        }
-    }
-
-    fn do_command(&self, cmd: Command) -> Result<Option<String>, Error> {
-        match cmd {
-            Command::FetchInbox { count } => {
-                if count == 1 {
-                    self.fetch_inbox_top()
-                } else {
-                    Err(Error::Unimplemented {
-                        backend: "gmail".to_string(),
-                        feature: "fetch_inbox_top_n".to_string(),
-                    })
-                }
-            }
-        }
-    }
-
-    fn fetch_inbox_top(&self) -> Result<Option<String>, Error> {
+    fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::Config(format!("Failed to create tokio runtime: {}", e)))?;
         
-        rt.block_on(self.fetch_inbox_top_async())
-    }
-
-    fn fetch_inbox_top_n(&self, _n: usize) -> Result<Vec<String>, Error> {
-        Err(Error::Unimplemented {
-            backend: "gmail".to_string(),
-            feature: "fetch_inbox_top_n".to_string(),
-        })
+        match cmd {
+            Command::FetchInbox { count } => {
+                let emails = rt.block_on(self.fetch_inbox_emails_async(count))?;
+                if emails.is_empty() {
+                    Ok(CommandResult::Empty)
+                } else if count == 1 {
+                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
+                } else {
+                    Ok(CommandResult::Emails(emails))
+                }
+            }
+            Command::SendEmail { to: _to, subject: _subject, body: _body } => {
+                // TODO: Implement email sending via Gmail API
+                Err(Error::Unimplemented {
+                    backend: "gmail".to_string(),
+                    feature: "send_email".to_string(),
+                })
+            }
+        }
     }
 }
 

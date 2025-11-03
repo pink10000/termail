@@ -3,9 +3,11 @@ pub mod backends;
 pub mod error;
 pub mod config;
 pub mod auth;
+pub mod types;
 
 use clap::{Parser, ArgAction};
-use backends::{BackendType, Backend, Command};
+use backends::{BackendType, Backend};
+use types::Command;
 use config::Config;
 use std::path::PathBuf;
 
@@ -51,13 +53,14 @@ fn main() {
     
     // Execute the command using the selected backend
     let result = match backend.do_command(args.command) {
-        Ok(Some(s)) => s,
-        Ok(None) => "NO EMAILS FOUND".to_string(),
+        Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
     };
 
+    // TODO: print result in a pretty way
+    
     println!("RESULT:\n{}", result);
 }
