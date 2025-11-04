@@ -8,16 +8,21 @@ use crate::error::Error;
 
 const TICK_FPS: f64 = 30.0;
 
+/// Terminal event.
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// A tick event emitted at a fixed rate.
     Tick,
+    /// A crossterm event (like a key press)
     Crossterm(CrosstermEvent),
+    /// An app event.
     App(AppEvent),
 }
 
 #[derive(Clone, Debug)]
 pub enum AppEvent {
-    ChangeViewState { state: ViewState}
+    ChangeViewState(ViewState),
+    Quit
 }
 
 /// Terminal event handler.
@@ -34,6 +39,7 @@ impl EventHandler {
     pub fn new() -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let actor = EventTask::new(sender.clone());
+        // Spawn a new thread to handle events in the background by repeatedly ticking.
         tokio::spawn(async { actor.run().await });
         Self { sender, receiver }
     }
@@ -46,9 +52,6 @@ impl EventHandler {
     }
 
     /// Queue an app event to be sent to the event receiver.
-    ///
-    /// This is useful for sending events to the event handler which will be processed by the next
-    /// iteration of the application's event loop.
     pub fn send(&mut self, app_event: AppEvent) {
         // Ignore the result as the reciever cannot be dropped while this struct still has a
         // reference to it

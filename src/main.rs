@@ -38,11 +38,13 @@ async fn main() {
     config.merge(&args);
     
     if !config.termail.cli {
-        let tui_result = crate::ui::app::App::new(config).run().await;
+        let terminal = ratatui::init();
+        let tui_result = crate::ui::app::App::new(config).run(terminal).await;
         match tui_result {
             Ok(_) => println!("TUI exited successfully"),
             Err(e) => eprintln!("TUI error: {}", e),
         }
+        ratatui::restore();
         std::process::exit(0);
     }
 
