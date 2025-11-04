@@ -3,11 +3,13 @@ pub mod error;
 pub mod config;
 pub mod auth;
 pub mod types;
+pub mod ui;
 
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
 use types::Command;
 use config::Config;
+
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -22,20 +24,26 @@ pub struct Args {
 
     /// The command to execute
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     /// Config file location
     #[arg(long, value_parser = clap::value_parser!(PathBuf))]
     config_file: Option<PathBuf>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let mut config = Config::load(args.config_file.clone()).unwrap();
     config.merge(&args);
-
+    
     if !config.termail.cli {
-        unimplemented!("tui mode not implemented yet");
+        let tui_result = crate::ui::app::App::new(config).run().await;
+        match tui_result {
+            Ok(_) => println!("TUI exited successfully"),
+            Err(e) => eprintln!("TUI error: {}", e),
+        }
+        std::process::exit(0);
     }
 
     let backend_type = config.termail.default_backend;
@@ -49,7 +57,7 @@ fn main() {
     }
     
     // Execute the command using the selected backend
-    let result = match backend.do_command(args.command) {
+    let result = match backend.do_command(args.command.unwrap()) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);
