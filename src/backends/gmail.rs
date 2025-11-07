@@ -21,7 +21,7 @@ impl GmailBackend {
         }
     }
 
-    async fn fetch_inbox_emails_async(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
+    async fn fetch_inbox_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
         let result = self.hub.as_ref().unwrap()
             .users()
             .messages_list("me")
@@ -85,7 +85,6 @@ impl GmailBackend {
                 (body, mime_type)
             } else {
                 // fallback
-                println!("Fallback: Payload parts not recognized");
                 let body = payload.body.as_ref()
                     .and_then(|b| b.data.as_ref())
                     .and_then(|data| std::str::from_utf8(data).ok())
@@ -157,7 +156,7 @@ impl Backend for GmailBackend {
     async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {        
         match cmd {
             Command::FetchInbox { count } => {
-                let emails = self.fetch_inbox_emails_async(count).await.unwrap();
+                let emails = self.fetch_inbox_emails(count).await.unwrap();
                 if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {

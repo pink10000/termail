@@ -1,11 +1,11 @@
 use ratatui::{
     buffer::Buffer, 
     layout::{Constraint, Direction, Layout, Rect}, 
-    style::{Color, Style, Stylize}, 
+    style::{Color, Style, Stylize, Modifier}, 
     widgets::{Block, Borders, Paragraph, Widget}
 };
 
-use crate::ui::app::App;
+use crate::ui::app::{App, ActiveViewState};
 
 /// Layout structure containing all UI component rectangles
 struct AppLayouts {
@@ -65,7 +65,7 @@ impl App {
             .borders(Borders::BOTTOM)
             .border_style(Style::default().fg(Color::White));
         
-        let text = format!("Termail - {}", self.config.termail.default_backend);
+        let text = format!("termail - {}", self.config.termail.default_backend);
         let paragraph = Paragraph::new(text)
             .block(block)
             .fg(Color::White)
@@ -81,7 +81,7 @@ impl App {
         
         let status = match &self.emails {
             None => "Loading emails...".to_string(),
-            Some(emails) => format!("{} email(s) | Press ESC to quit", emails.len()),
+            Some(emails) => format!("{} email(s) | Press ESC to quit | Tab to cycle views", emails.len()),
         };
         
         let paragraph = Paragraph::new(status)
@@ -101,10 +101,17 @@ impl App {
     }
     
     fn render_folder_pane(&self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .title("Folders");
+        let is_active = matches!(self.state, ActiveViewState::FolderView);
         
-        let content = "INBOX";
+        let block = Block::default()
+            .title("Folders")
+            .title_style(if is_active {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            });
+        
+        let content = self.selected_folder.clone();
         let paragraph = Paragraph::new(content)
             .block(block)
             .fg(Color::White);
@@ -113,31 +120,42 @@ impl App {
     }
 
     fn render_email_list_pane(&self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .title("Emails");
+        let is_active = matches!(self.state, ActiveViewState::InboxView);
         
+        let block = Block::default()
+            .title("Emails")
+            .title_style(if is_active {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            });
+        
+        let width = area.width as usize;
+        let from_max_length: usize = 20;
+        let subject_max_length: usize = width.saturating_sub(from_max_length + 2); // +2 for "> " prefix
+
         let content = match &self.emails {
             None => "Loading...".to_string(),
             Some(emails) if emails.is_empty() => "No emails found".to_string(),
             Some(emails) => {
                 emails.iter()
                     .map(|email| {
-                        // Format: "From: subject"
-                        let from = if email.from.len() > 15 {
-                            format!("{}...", &email.from[0..12])
+                        let from = if email.from.len() > from_max_length {
+                            format!("{}...", &email.from[0..(from_max_length - 3)])
                         } else {
                             email.from.clone()
                         };
                         
-                        let subject = if email.subject.len() > 30 {
-                            format!("{}...", &email.subject[0..27])
+                        let subject = if email.subject.len() > subject_max_length {
+                            format!("{}...", &email.subject[0..(subject_max_length - 3)])
                         } else {
                             email.subject.clone()
                         };
                         
+                        
                         format!("{}: {}", from, subject)
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<String>>()
                     .join("\n")
             }
         };
@@ -150,26 +168,39 @@ impl App {
     }
 
     fn render_message_pane(&self, area: Rect, buf: &mut Buffer) {
+        let is_active = matches!(self.state, ActiveViewState::MessageView);
+        
         let block = Block::default()
-            .title("Message");
+            .title("Message")
+            .title_style(if is_active {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            });
         
         let content = match &self.emails {
             None => "Loading...".to_string(),
             Some(emails) if emails.is_empty() => "No message selected".to_string(),
-            Some(emails) if !emails.is_empty() => {
-                // Show the first email for now
-                // TODO: Add selection logic to show selected email
-                let email = &emails[0];
-                format!(
-                    "From: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
-                    email.from,
-                    email.to,
-                    email.date,
-                    email.subject,
-                    email.body
-                )
+            Some(emails) => {
+                // Show the selected email based on selected_email_index
+                if let Some(index) = self.selected_email_index {
+                    if index < emails.len() {
+                        let email = &emails[index];
+                        format!(
+                            "From: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
+                            email.from,
+                            email.to,
+                            email.date,
+                            email.subject,
+                            email.body
+                        )
+                    } else {
+                        "No message selected".to_string()
+                    }
+                } else {
+                    "No message selected".to_string()
+                }
             }
-            _ => "".to_string(),
         };
         
         let paragraph = Paragraph::new(content)

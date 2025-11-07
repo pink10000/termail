@@ -10,18 +10,18 @@ use crate::error::Error;
 use super::event::{Event, EventHandler};
 use crate::backends::Backend;
 use crate::types::CommandResult;
-use std::sync::{Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
-pub enum ViewState {
+pub enum ActiveViewState {
     FolderView,
-    InboxView { folder: String },
-    MessageView { message: EmailMessage },
+    InboxView,
+    MessageView,
 }
 
 pub struct App {
-    pub state: ViewState,
+    pub state: ActiveViewState,
     pub running: bool,
     pub events: EventHandler, 
     pub config: Config,
@@ -34,6 +34,10 @@ pub struct App {
     pub backend: Arc<Mutex<Box<dyn Backend>>>,
     /// Counter to track ticks for periodic refresh (and other tasks)
     pub tick_counter: u64,
+    /// Index of the currently selected email in the inbox view
+    pub selected_email_index: Option<usize>,
+    /// Name of the currently selected folder
+    pub selected_folder: String,
 }
 
 impl App {
@@ -49,13 +53,15 @@ impl App {
         );
 
         Self { 
-            state: ViewState::FolderView, 
+            state: ActiveViewState::FolderView, 
             running: true,
             events,
             config,
             emails: None,  // Start with None to indicate loading state
             backend,
             tick_counter: 0,
+            selected_email_index: Some(0),  // Start with first email selected
+            selected_folder: "INBOX".to_string(),
         }
     }
 
@@ -77,7 +83,10 @@ impl App {
                     AppEvent::EmailsFetched(emails) => {
                         self.emails = Some(emails);
                     },
-                    AppEvent::ChangeViewState(_) => {},
+                    AppEvent::CycleViewState => {
+                        self.cycle_view_state();
+                    }
+                    _ => {}
                 }
             }
         }        
@@ -87,6 +96,7 @@ impl App {
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> Result<(), Error> {
         match key_event.code {
             KeyCode::Esc => self.events.send(AppEvent::Quit),
+            KeyCode::Tab => self.events.send(AppEvent::CycleViewState),
             _ => {}
         }
         Ok(())
@@ -94,6 +104,40 @@ impl App {
 
     pub fn quit(&mut self) {
         self.running = false;
+    }
+
+    /// Cycles through view states: FolderView -> InboxView -> MessageView -> FolderView
+    /// State is preserved when cycling (e.g., selected email index is maintained)
+    pub fn cycle_view_state(&mut self) {
+        self.state = match self.state {
+            ActiveViewState::FolderView => ActiveViewState::InboxView,
+            ActiveViewState::InboxView => ActiveViewState::MessageView,
+            ActiveViewState::MessageView => ActiveViewState::FolderView,
+        };
+    }
+
+    /// Selects the next email in the list
+    pub fn select_next_email(&mut self) {
+        if let Some(emails) = &self.emails {
+            if emails.is_empty() {
+                return;
+            }
+            
+            if let Some(index) = self.selected_email_index {
+                if index + 1 < emails.len() {
+                    self.selected_email_index = Some(index + 1);
+                }
+            }
+        }
+    }
+
+    /// Selects the previous email in the list (only works in InboxView)
+    pub fn select_previous_email(&mut self) {
+        if let Some(index) = self.selected_email_index {
+            if index > 0 {
+                self.selected_email_index = Some(index - 1);
+            }
+        }
     }
 
     /// Handles the tick event of the terminal.
