@@ -26,6 +26,9 @@ pub struct BackendConfig {
     pub port: u16,
     pub ssl: bool,
     pub oauth2_client_secret_file: Option<String>,
+    // The labels to filter out from the list of labels
+    // The labels are case-sensitive.
+    pub filter_labels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

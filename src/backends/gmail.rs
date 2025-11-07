@@ -12,13 +12,15 @@ type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpCo
 pub struct GmailBackend {
     oauth2_client_secret_file: Option<String>,
     hub: Option<Box<GmailHub>>,
+    filter_labels: Option<Vec<String>>,
 }
 
 impl GmailBackend {
     pub fn new(config: &BackendConfig) -> Self {
         Self {
             oauth2_client_secret_file: config.oauth2_client_secret_file.clone(),
-            hub: None
+            hub: None,
+            filter_labels: config.filter_labels.clone(),
         }
     }
 
@@ -141,10 +143,6 @@ impl GmailBackend {
             name: label.name.clone(),
         }).collect::<Vec<types::Label>>();
         
-        for label in output.iter() {
-            println!("{}", label);
-        }
-
         Ok(output)
     }
 }
@@ -208,9 +206,14 @@ impl Backend for GmailBackend {
                 }
             },
             Command::ListLabels => {
-                let labels = self.list_labels().await.unwrap();
+                let mut labels = self.list_labels().await.unwrap();
+                if let Some(filter_labels) = self.filter_labels.as_ref() {
+                    labels = labels.into_iter()
+                        .filter(|label| !filter_labels
+                            .contains(&label.name.as_ref().unwrap().to_string()))
+                        .collect();
+                }
                 Ok(CommandResult::Labels(labels))
-
             },
             Command::SendEmail { to: _to, subject: _subject, body: _body } => {
                 // TODO: Implement email sending via Gmail API
