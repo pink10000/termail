@@ -3,7 +3,7 @@ extern crate imap;
 use super::{Backend, Error};
 use crate::auth::Credentials;
 use crate::config::BackendConfig;
-use crate::types::{Command, CommandResult, EmailMessage};
+use crate::types::{Command, CommandResult, EmailMessage, Label};
 use async_trait::async_trait;
 
 pub struct GreenmailBackend {
@@ -71,6 +71,14 @@ impl GreenmailBackend {
         Ok(emails)
     }
 
+    fn list_labels(&self) -> Result<Vec<Label>, Error> {
+        eprintln!("unimplemented!");
+        return Err(Error::Unimplemented {
+            backend: "greenmail".to_string(),
+            feature: "list_labels".to_string(),
+        });
+    }  
+
     /// Greenmail (or the library?) parses emails in a weird way. This method provides a layer to our
     /// `EmailMessage` type api.
     fn parse_email_message(&self, message: &imap::types::Fetch) -> Result<EmailMessage, Error> {
@@ -118,6 +126,10 @@ impl Backend for GreenmailBackend {
                 } else {
                     Ok(CommandResult::Emails(emails))
                 }
+            },
+            Command::ListLabels => {
+                let labels = self.list_labels()?;
+                Ok(CommandResult::Labels(labels))
             }
             Command::SendEmail { to: _to, subject: _subject, body: _body } => {
                 // TODO: Implement email sending

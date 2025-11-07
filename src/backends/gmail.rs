@@ -1,11 +1,12 @@
 use super::{Backend, Error};
-use crate::types::Command;
 use crate::config::BackendConfig;
-use crate::types::{CommandResult, EmailMessage, MimeType};
+use crate::types;
+use crate::types::{CommandResult, EmailMessage, MimeType, Command};
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
+use futures::future;
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
@@ -105,6 +106,47 @@ impl GmailBackend {
         }
         Ok(emails)
     }
+
+    async fn list_labels(&self) -> Result<Vec<types::Label>, Error> {
+        let result = self.hub.as_ref().unwrap()
+            .users()
+            .labels_list("me")
+            .doit()
+            .await
+            .map_err(|e| Error::Connection(format!("Failed to fetch labels: {}", e)))?;
+
+        let partial_labels: Vec<google_gmail1::api::Label> = result.1.labels.unwrap();
+        let futures = partial_labels.into_iter()
+            .filter_map(|partial_label| {
+                partial_label.id.map(|label_id| {
+                    // Create an async task for each label_get request.
+                    async move {
+                        let result = self.hub.as_ref().unwrap()
+                            .users()
+                            .labels_get("me", &label_id)
+                            .doit()
+                            .await
+                            .map_err(|e| Error::Connection(format!("Failed to fetch label {}: {}", label_id, e)));
+                        result.unwrap().1
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let detailed_labels: Vec<google_gmail1::api::Label> = future::join_all(futures).await;
+        let output = detailed_labels.iter().map(|label| types::Label {
+            color: label.color.clone(),
+            id: label.id.clone(),
+            messages_total: label.messages_total.map(|x| x as usize),
+            messages_unread: label.messages_unread.map(|x| x as usize),
+            name: label.name.clone(),
+        }).collect::<Vec<types::Label>>();
+        
+        for label in output.iter() {
+            println!("{}", label);
+        }
+
+        Ok(output)
+    }
 }
 
 #[async_trait]
@@ -164,7 +206,12 @@ impl Backend for GmailBackend {
                 } else {
                     Ok(CommandResult::Emails(emails))
                 }
-            }
+            },
+            Command::ListLabels => {
+                let labels = self.list_labels().await.unwrap();
+                Ok(CommandResult::Labels(labels))
+
+            },
             Command::SendEmail { to: _to, subject: _subject, body: _body } => {
                 // TODO: Implement email sending via Gmail API
                 Err(Error::Unimplemented {

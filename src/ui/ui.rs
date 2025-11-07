@@ -141,13 +141,13 @@ impl App {
                 emails.iter()
                     .map(|email| {
                         let from = if email.from.len() > from_max_length {
-                            format!("{}...", &email.from[0..(from_max_length - 3)])
+                            format!("{}...", &email.from[0..(from_max_length - 4)])
                         } else {
                             email.from.clone()
                         };
                         
                         let subject = if email.subject.len() > subject_max_length {
-                            format!("{}...", &email.subject[0..(subject_max_length - 3)])
+                            format!("{}...", &email.subject[0..(subject_max_length - 4)])
                         } else {
                             email.subject.clone()
                         };
