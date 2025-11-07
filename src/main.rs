@@ -9,8 +9,22 @@ use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
 use types::Command;
 use config::Config;
+use ui::app::App;
 
 use std::path::PathBuf;
+
+fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
+    let backend_type = config.termail.default_backend;
+    let mut backend: Box<dyn Backend> = config.get_backend();
+    
+    if backend_type.needs_oauth() {
+        if let Err(e) = backend.authenticate() {
+            eprintln!("Authentication failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+    backend
+}
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -34,12 +48,16 @@ pub struct Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let mut config = Config::load(args.config_file.clone()).unwrap();
+    let mut config = Config::load(args.config_file.clone()).unwrap_or_else(|e| {
+        eprintln!("Error loading config: {}", e);
+        std::process::exit(1);
+    });
     config.merge(&args);
     
     if !config.termail.cli {
+        let backend: Box<dyn Backend> = create_authenticated_backend(&config);
         let terminal = ratatui::init();
-        let tui_result = crate::ui::app::App::new(config).run(terminal).await;
+        let tui_result = App::new(config, backend).run(terminal).await;
         match tui_result {
             Ok(_) => println!("TUI exited successfully"),
             Err(e) => eprintln!("TUI error: {}", e),
@@ -48,6 +66,14 @@ async fn main() {
         std::process::exit(0);
     }
 
+    match args.command {
+        None => {
+            eprintln!("Missing Subcommand for CLI mode.");
+            std::process::exit(1);
+        }
+        Some(_) => {}
+    }
+        
     let backend_type = config.termail.default_backend;
     let mut backend: Box<dyn Backend> = config.get_backend();
     

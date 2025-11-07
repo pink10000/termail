@@ -8,7 +8,7 @@ use crate::types::{Command, CommandResult};
 
 use std::fmt;
 
-pub trait Backend {
+pub trait Backend: Send {
     fn needs_oauth(&self) -> bool {
         false
     }

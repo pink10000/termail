@@ -16,6 +16,7 @@ use std::fs;
 pub struct TermailConfig {
     pub cli: bool,
     pub default_backend: BackendType,
+    pub email_fetch_count: usize
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -47,13 +48,14 @@ impl Config {
             None => std::fs::read_to_string("config.toml")
                 .or_else(|_| fs::read_to_string("~/.config/termail/config.toml"))
                 .or_else(|_| fs::read_to_string("/etc/termail/config.toml"))
-                .map_err(|e| Error::Config(e.to_string())),
+                .map_err(|e| Error::Other(e.to_string())),
         };
 
-        let config: Config = toml::from_str(config_file.unwrap().as_str())
-            .map_err(|e| Error::Config(e.to_string()))
-            .unwrap();
-        
+        let config: Config = match config_file {
+            Ok(c) => toml::from_str(c.as_str()).map_err(|e| Error::Config(e.to_string()))?,
+            Err(e) => return Err(e),
+        };
+                
         // Validate backend configurations
         for (be_type, be_config) in config.backends.clone().into_iter() {
             match be_type {

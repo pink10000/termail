@@ -3,6 +3,7 @@ use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::types::EmailMessage;
 use crate::ui::app::ViewState;
 use crate::error::Error;
 
@@ -22,6 +23,7 @@ pub enum Event {
 #[derive(Clone, Debug)]
 pub enum AppEvent {
     ChangeViewState(ViewState),
+    EmailsFetched(Vec<EmailMessage>),
     Quit
 }
 
@@ -49,6 +51,11 @@ impl EventHandler {
             .recv()
             .await
             .ok_or_else(|| Error::Other("Event channel closed".to_string()))
+    }
+    
+    /// Get a sender handle that can be cloned and passed to async tasks
+    pub fn get_sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.sender.clone()
     }
 
     /// Queue an app event to be sent to the event receiver.
