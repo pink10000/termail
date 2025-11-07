@@ -10,7 +10,8 @@ use crate::error::Error;
 use super::event::{Event, EventHandler};
 use crate::backends::Backend;
 use crate::types::CommandResult;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
+use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
 pub enum ViewState {
@@ -129,8 +130,8 @@ impl App {
         tokio::spawn(async move {
             // Acquire lock and fetch emails
             let result = {
-                let backend_guard = backend.lock().unwrap();
-                backend_guard.do_command(Command::FetchInbox { count })
+                let backend_guard = backend.lock().await;
+                backend_guard.do_command(Command::FetchInbox { count }).await
             };
             
             match result {

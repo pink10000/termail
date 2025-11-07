@@ -4,7 +4,7 @@ use crate::config::BackendConfig;
 use crate::types::{CommandResult, EmailMessage, MimeType};
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
-
+use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
@@ -19,46 +19,6 @@ impl GmailBackend {
             oauth2_client_secret_file: config.oauth2_client_secret_file.clone(),
             hub: None
         }
-    }
-
-    async fn authenticate_async(&mut self) -> Result<(), Error> {
-        let secret_file = self.oauth2_client_secret_file.as_ref()
-            .ok_or_else(|| Error::Config(
-                "No OAuth2 client secret file configured for Gmail backend".to_string()
-            ))?;
-
-        let secret = yup_oauth2::read_application_secret(secret_file)
-            .await
-            .map_err(|e| Error::Config(format!("Failed to read OAuth2 secret file: {}", e)))?;
-
-        // Set up the OAuth2 authenticator with installed flow (opens browser)
-        // TODO: use a better way to get the scopes
-        // Should be defined in the config file maybe?
-        let scopes = &[
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.addons.current.message.readonly"
-        ];
-        
-        let auth = InstalledFlowAuthenticator::builder(secret,InstalledFlowReturnMethod::HTTPRedirect)
-            .persist_tokens_to_disk("tokencache.json")
-            .build()
-            .await
-            .map_err(|e| Error::Config(format!("Failed to build authenticator: {}", e)))?;
-        auth.token(scopes).await.map_err(|e| Error::Config(format!("Failed to get token: {}", e)))?;
-        
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_native_roots()
-            .map_err(|e| Error::Config(format!("Failed to load native roots: {}", e)))?
-            .https_or_http()
-            .enable_http1()
-            .build();
-
-        let client = hyper_util::client::legacy::Client::builder(
-            hyper_util::rt::TokioExecutor::new()
-        ).build(https);
-
-        self.hub = Some(Box::new(Gmail::new(client, auth)));
-        Ok(())
     }
 
     async fn fetch_inbox_emails_async(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
@@ -148,25 +108,56 @@ impl GmailBackend {
     }
 }
 
+#[async_trait]
 impl Backend for GmailBackend {
     fn needs_oauth(&self) -> bool {
         true
     }
 
-    fn authenticate(&mut self) -> Result<(), Error> {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| Error::Config(format!("Failed to create tokio runtime: {}", e)))?;
+    async fn authenticate(&mut self) -> Result<(), Error> {
+        let secret_file = self.oauth2_client_secret_file.as_ref()
+            .ok_or_else(|| Error::Config(
+                "No OAuth2 client secret file configured for Gmail backend".to_string()
+            ))?;
+
+        let secret = yup_oauth2::read_application_secret(secret_file)
+            .await
+            .map_err(|e| Error::Config(format!("Failed to read OAuth2 secret file: {}", e)))?;
+
+        // Set up the OAuth2 authenticator with installed flow (opens browser)
+        // TODO: use a better way to get the scopes
+        // Should be defined in the config file maybe?
+        let scopes = &[
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.addons.current.message.readonly"
+        ];
         
-        rt.block_on(self.authenticate_async())
+        let auth = InstalledFlowAuthenticator::builder(secret,InstalledFlowReturnMethod::HTTPRedirect)
+            .persist_tokens_to_disk("tokencache.json")
+            .build()
+            .await
+            .map_err(|e| Error::Config(format!("Failed to build authenticator: {}", e)))?;
+        auth.token(scopes).await.map_err(|e| Error::Config(format!("Failed to get token: {}", e)))?;
+        
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .map_err(|e| Error::Config(format!("Failed to load native roots: {}", e)))?
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        let client = hyper_util::client::legacy::Client::builder(
+            hyper_util::rt::TokioExecutor::new()
+        ).build(https);
+
+        self.hub = Some(Box::new(Gmail::new(client, auth)));
+        Ok(())
     }
 
-    fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| Error::Config(format!("Failed to create tokio runtime: {}", e)))?;
-        
+    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {        
         match cmd {
             Command::FetchInbox { count } => {
-                let emails = rt.block_on(self.fetch_inbox_emails_async(count))?;
+                let emails = self.fetch_inbox_emails_async(count).await.unwrap();
                 if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {

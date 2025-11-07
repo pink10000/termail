@@ -5,9 +5,11 @@ pub mod gmail;
 use crate::error::Error;
 use crate::config::BackendConfig;
 use crate::types::{Command, CommandResult};
+use async_trait::async_trait;
 
 use std::fmt;
 
+#[async_trait]
 pub trait Backend: Send {
     fn needs_oauth(&self) -> bool {
         false
@@ -15,12 +17,12 @@ pub trait Backend: Send {
 
     /// Perform authentication (if needed). This is a sync wrapper that may spawn async tasks.
     /// Returns Ok(()) if authentication succeeded or wasn't needed.
-    fn authenticate(&mut self) -> Result<(), Error> {
+    async fn authenticate(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
     /// Execute a command and return a structured result
-    fn do_command(&self, cmd: Command) -> Result<CommandResult, Error>;
+    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]

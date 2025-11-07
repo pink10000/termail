@@ -4,6 +4,7 @@ use super::{Backend, Error};
 use crate::auth::Credentials;
 use crate::config::BackendConfig;
 use crate::types::{Command, CommandResult, EmailMessage};
+use async_trait::async_trait;
 
 pub struct GreenmailBackend {
     host: String,
@@ -100,12 +101,13 @@ impl GreenmailBackend {
     }
 }
 
+#[async_trait]
 impl Backend for GreenmailBackend {
     fn needs_oauth(&self) -> bool {
         false 
     }
 
-    fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {
+    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {
         match cmd {
             Command::FetchInbox { count } => {
                 let emails = self.fetch_inbox_emails(count)?;

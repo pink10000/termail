@@ -1811,6 +1811,7 @@ dependencies = [
 name = "termail"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
  "crossterm",
  "futures",

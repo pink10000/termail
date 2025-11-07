@@ -13,12 +13,12 @@ use ui::app::App;
 
 use std::path::PathBuf;
 
-fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
+async fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
     let backend_type = config.termail.default_backend;
     let mut backend: Box<dyn Backend> = config.get_backend();
     
     if backend_type.needs_oauth() {
-        if let Err(e) = backend.authenticate() {
+        if let Err(e) = backend.authenticate().await {
             eprintln!("Authentication failed: {}", e);
             std::process::exit(1);
         }
@@ -55,7 +55,7 @@ async fn main() {
     config.merge(&args);
     
     if !config.termail.cli {
-        let backend: Box<dyn Backend> = create_authenticated_backend(&config);
+        let backend: Box<dyn Backend> = create_authenticated_backend(&config).await;
         let terminal = ratatui::init();
         let tui_result = App::new(config, backend).run(terminal).await;
         match tui_result {
@@ -78,14 +78,14 @@ async fn main() {
     let mut backend: Box<dyn Backend> = config.get_backend();
     
     if backend_type.needs_oauth() {
-        if let Err(e) = backend.authenticate() {
+        if let Err(e) = backend.authenticate().await {
             eprintln!("Authentication failed: {}", e);
             std::process::exit(1);
         }
     }
     
     // Execute the command using the selected backend
-    let result = match backend.do_command(args.command.unwrap()) {
+    let result = match backend.do_command(args.command.unwrap()).await {
         Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);
