@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::types::EmailMessage;
+use crate::types::{EmailMessage, Label};
 use crate::ui::app::ActiveViewState;
 use crate::error::Error;
 
@@ -25,6 +25,7 @@ pub enum AppEvent {
     ChangeViewState(ActiveViewState),
     CycleViewState,
     EmailsFetched(Vec<EmailMessage>),
+    LabelsFetched(Vec<Label>),
     Quit
 }
 

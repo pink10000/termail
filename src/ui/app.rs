@@ -4,7 +4,7 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent}, DefaultTerminal
 };
 
-use crate::{types::{Command, EmailMessage}, ui::event::AppEvent};
+use crate::{types::{Command, EmailMessage, Label}, ui::event::AppEvent};
 use crate::config::Config;
 use crate::error::Error;
 use super::event::{Event, EventHandler};
@@ -27,6 +27,7 @@ pub struct App {
     pub config: Config,
     /// Email storage. None means not loaded yet, Some(vec![]) means loaded but empty.
     pub emails: Option<Vec<EmailMessage>>,
+    pub labels: Option<Vec<Label>>,
     /// Thread-safe backend for sharing across async tasks
     /// 
     /// We use this to allow multiple async tasks to access the backend concurrently. In 
@@ -45,6 +46,11 @@ impl App {
         let backend = Arc::new(Mutex::new(backend));
         let events = EventHandler::new();
         
+        Self::spawn_label_fetch(
+            Arc::clone(&backend),
+            events.get_sender(),
+        );
+
         // Spawn initial email fetch
         Self::spawn_email_fetch(
             Arc::clone(&backend),
@@ -58,6 +64,7 @@ impl App {
             events,
             config,
             emails: None,  // Start with None to indicate loading state
+            labels: None,  // Start with None to indicate loading state
             backend,
             tick_counter: 0,
             selected_email_index: Some(0),  // Start with first email selected
@@ -82,6 +89,9 @@ impl App {
                     AppEvent::Quit => self.quit(),
                     AppEvent::EmailsFetched(emails) => {
                         self.emails = Some(emails);
+                    },
+                    AppEvent::LabelsFetched(labels) => {
+                        self.labels = Some(labels);
                     },
                     AppEvent::CycleViewState => {
                         self.cycle_view_state();
@@ -194,6 +204,28 @@ impl App {
                 _ => {
                     eprintln!("Unexpected command result from fetch_inbox");
                 }
+            }
+        });
+    }
+
+    fn spawn_label_fetch(
+        backend: Arc<Mutex<Box<dyn Backend>>>,
+        sender: tokio::sync::mpsc::UnboundedSender<Event>,
+    ) {
+        tokio::spawn(async move {
+            let result = {
+                let backend_guard = backend.lock().await;
+                backend_guard.do_command(Command::ListLabels).await
+            };
+
+            match result {
+                Ok(CommandResult::Labels(labels)) => {
+                    let _ = sender.send(Event::App(AppEvent::LabelsFetched(labels)));
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch labels: {}", e);
+                },
+                _ => eprintln!("Unexpected command result from list_labels"),
             }
         });
     }
