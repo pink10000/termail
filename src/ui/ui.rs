@@ -17,16 +17,17 @@ fn create_label_item(label: &Label) -> ListItem<'static> {
         return ListItem::new(name.to_string());
     }
 
-    let unread = label.messages_unread.unwrap();
-    let total = label.messages_total.unwrap();
+    // let unread = label.messages_unread.unwrap();
+    // let total = label.messages_total.unwrap();
     
     // Format: "LabelName (unread/total)"
-    let label_text = if unread > 0 {
-        format!("{} ({}/{})", name, unread, total)
-    } else {
-        format!("{} ({})", name, total)
-    };
-    
+    // let label_text = if unread > 0 {
+        // format!("{} ({}/{})", name, unread, total)
+    // } else {
+        // format!("{} ({})", name, total)
+    // };
+    let label_text = format!("{}", name);
+
     // Create styled text with color indicator if available
     let line = if label.color.is_some() {
         // If label has a color, add a colored indicator
@@ -53,8 +54,33 @@ struct AppLayouts {
 }
 
 impl App {
+    /// Calculate the optimal folder pane width based on loaded labels
+    /// Returns the width in characters, or None if labels aren't loaded yet
+    fn calculate_folder_pane_width(&self) -> Option<u16> {
+        self.labels.as_ref().and_then(|labels| {
+            labels.iter()
+                .filter_map(|label| {
+                    // Only calculate for labels with all required fields
+                    let name = label.name.as_ref()?;
+                    // let unread = label.messages_unread?;
+                    // let total = label.messages_total?;
+                    
+                    // Calculate the display width: "Name (unread/total)"
+                    let width = name.len();
+                    
+                    Some(width)
+                })
+                .max()
+                .map(|max_width| {
+                    // Add some padding (title + borders = ~4 chars)
+                    // Clamp between reasonable min/max values
+                    (max_width).clamp(10, 50) as u16
+                })
+        })
+    }
+
     /// Calculate all layout rectangles for the UI
-    fn create_layouts(area: Rect) -> AppLayouts {
+    fn create_layouts(&self, area: Rect) -> AppLayouts {
         // Main vertical layout: top bar, middle section, bottom bar
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
@@ -69,17 +95,18 @@ impl App {
         let middle_section = main_layout[1];
         let bottom_bar = main_layout[2];
 
+        // Determine folder pane width (default to 20 if labels not loaded)
+        let folder_pane_width = self.calculate_folder_pane_width().unwrap_or(20);
+
         // Middle section: folder | border | emails | border | message
-        // TODO: find a way to pull this from the `Config`
-        const FOLDER_PANE_WIDTH: u16 = 20;
         let middle_section_layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(vec![
-                Constraint::Percentage(FOLDER_PANE_WIDTH),
+                Constraint::Length(folder_pane_width),  // Fixed width based on content
                 Constraint::Length(1),  // Border
-                Constraint::Percentage((100 - FOLDER_PANE_WIDTH) / 2),
+                Constraint::Percentage((100 - folder_pane_width) / 2),
                 Constraint::Length(1),  // Border
-                Constraint::Percentage((100 - FOLDER_PANE_WIDTH) / 2),
+                Constraint::Percentage((100 - folder_pane_width) / 2),
             ])
             .split(middle_section);
         
@@ -272,7 +299,7 @@ impl Widget for &App {
     /// The size of the layout should eventually be controlled by the config. 
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Calculate all layout rectangles
-        let layouts = App::create_layouts(area);
+        let layouts = self.create_layouts(area);
         
         // Render all components
         self.render_top_bar(layouts.top_bar, buf);

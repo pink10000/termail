@@ -46,6 +46,7 @@ impl App {
         let backend = Arc::new(Mutex::new(backend));
         let events = EventHandler::new();
         
+        // Spawn initial label fetch
         Self::spawn_label_fetch(
             Arc::clone(&backend),
             events.get_sender(),
