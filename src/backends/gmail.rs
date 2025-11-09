@@ -40,71 +40,87 @@ impl GmailBackend {
             return Ok(Vec::new())
         }
         
-        let mut emails = Vec::new();
-        
-        for message in messages {
-            let message_id = message.id.as_ref().unwrap();
-            let message_response = self.hub.as_ref().unwrap()
-                .users()
-                .messages_get("me", message_id)
-                .format("full")
-                .doit()
-                .await
-                .map_err(|e| Error::Connection(format!("Failed to fetch message {}: {}", message_id, e)))?;
+        let futures = messages.into_iter()
+            .filter_map(|message| {
+                message.id.map(|message_id| {
+                    async move {
+                        let message_response = self.hub.as_ref().unwrap()
+                            .users()
+                            .messages_get("me", message_id.as_str())
+                            .format("full")
+                            .doit()
+                            .await
+                            .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
                         
-            let payload: google_gmail1::api::MessagePart = message_response.1.payload.unwrap();
-            let headers: Vec<google_gmail1::api::MessagePartHeader> = payload.headers.unwrap();
-
-            // Helper function to extract header value by name
-            // this is probably not maintainable; but it's cool!
-            let get_header = |name: &str| -> String {
-                headers.iter()
-                    .find(|h| h.name.as_ref().map_or(false, |n| n == name))
-                    .and_then(|h| h.value.as_ref())
-                    .cloned()
-                    .unwrap_or_default()
-            };
-
-            // Extract body and mime type from parts
-            let (body, mime_type) = if let Some(parts) = &payload.parts {
-                let mut body = String::new();
-                let mut mime_type = Default::default();
-                
-                for part in parts {
-                    if let Some(text) = part.body.as_ref()
-                        .and_then(|b| b.data.as_ref())
-                        .and_then(|data| std::str::from_utf8(data).ok())
-                    {
-                        body.push_str(text);
+                        // Return the result (either Ok or Err) along with the message_id
+                        message_response.map(|resp| (message_id, resp.1))
                     }
-                    
-                    if let Some(part_mime) = &part.mime_type {
-                        if part_mime.contains("html") {
-                            mime_type = MimeType::TextHtml;
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let message_results = future::join_all(futures).await;
+        
+        // We might be able to use an array here instead of a vector here in the future.
+        let mut emails = Vec::new();
+        for result in message_results {
+            match result {
+                Ok((message_id, message)) => {
+                    let payload: google_gmail1::api::MessagePart = message.payload.unwrap();
+                    let headers = payload.headers.unwrap();
+
+                    // Helper function to extract header value by name
+                    let get_header = |name: &str| -> String {
+                        headers.iter()
+                            .find(|h| h.name.as_ref().map_or(false, |n| n == name))
+                            .and_then(|h| h.value.as_ref())
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+
+                    // Extract body and mime type from parts
+                    let (body, mime_type) = if let Some(parts) = &payload.parts {
+                        let mut body = String::new();
+                        let mut mime_type = Default::default();
+                        
+                        for part in parts {
+                            if let Some(text) = part.body.as_ref()
+                                .and_then(|b| b.data.as_ref())
+                                .and_then(|data| std::str::from_utf8(data).ok())
+                            {
+                                body.push_str(text);
+                            }
+                            
+                            if let Some(part_mime) = &part.mime_type {
+                                if part_mime.contains("html") {
+                                    mime_type = MimeType::TextHtml;
+                                }
+                            }
                         }
-                    }
+                        
+                        (body, mime_type)
+                    } else {
+                        // fallback
+                        let body = payload.body.as_ref()
+                            .and_then(|b| b.data.as_ref())
+                            .and_then(|data| std::str::from_utf8(data).ok())
+                            .unwrap_or("")
+                            .to_string();
+                        (body, MimeType::TextPlain)
+                    };
+                    
+                    emails.push(EmailMessage { 
+                        id: message_id, 
+                        subject: get_header("Subject"),
+                        from: get_header("From"),
+                        to: get_header("To"),
+                        date: get_header("Date"),
+                        body,
+                        mime_type,
+                    });
                 }
-                
-                (body, mime_type)
-            } else {
-                // fallback
-                let body = payload.body.as_ref()
-                    .and_then(|b| b.data.as_ref())
-                    .and_then(|data| std::str::from_utf8(data).ok())
-                    .unwrap_or("")
-                    .to_string();
-                (body, MimeType::TextPlain)
-            };
-
-            emails.push(EmailMessage { 
-                id: message_id.to_string(), 
-                subject: get_header("Subject"),
-                from: get_header("From"),
-                to: get_header("To"),
-                date: get_header("Date"),
-                body,
-                mime_type,
-            });       
+                Err(e) => eprintln!("Failed to fetch message: {}", e),
+            }
         }
         Ok(emails)
     }
