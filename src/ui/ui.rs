@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer, 
     layout::{Constraint, Direction, Layout, Rect}, 
     style::{Color, Style, Stylize, Modifier}, 
-    widgets::{Block, Borders, Paragraph, Widget, List, ListItem},
+    widgets::{Block, Borders, Paragraph, Widget, List, ListItem, ListState},
     text::{Line, Span}
 };
 
@@ -213,39 +213,43 @@ impl App {
         
         let width = area.width as usize;
         let from_max_length: usize = 20;
-        let subject_max_length: usize = width.saturating_sub(from_max_length + 2); // +2 for "> " prefix
+        let _subject_max_length: usize = width.saturating_sub(from_max_length + 2); // +2 for "> " prefix
 
-        let content = match &self.emails {
-            None => "Loading...".to_string(),
-            Some(emails) if emails.is_empty() => "No emails found".to_string(),
-            Some(emails) => {
-                emails.iter()
-                    .map(|email| {
-                        let from = if email.from.len() > from_max_length {
-                            format!("{}...", &email.from[0..(from_max_length - 4)])
-                        } else {
-                            email.from.clone()
-                        };
-                        
-                        let subject = if email.subject.len() > subject_max_length {
-                            format!("{}...", &email.subject[0..(subject_max_length - 4)])
-                        } else {
-                            email.subject.clone()
-                        };
-                        
-                        
-                        format!("{}: {}", from, subject)
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n")
-            }
+        // Create list items (each email = one row)
+        let items: Vec<ListItem> = match &self.emails {
+            None => vec![ListItem::new("Loading...")],
+            Some(emails) if emails.is_empty() => vec![ListItem::new("No emails found")],
+            Some(emails) => emails
+                .iter()
+                .map(|email| {
+                    let from = &email.from;
+                    let subject = &email.subject;
+                    let line = Line::from(vec![
+                        Span::styled(format!("{:<20}", from), Style::default().fg(Color::Cyan)),
+                        Span::raw(" "),
+                        Span::styled(subject, Style::default().fg(Color::White)),
+                    ]);
+                    ListItem::new(line)
+                })
+                .collect(),
         };
-        
-        let paragraph = Paragraph::new(content)
+
+        let list = List::new(items)
             .block(block)
-            .fg(Color::White);
-        
-        paragraph.render(area, buf);
+            .highlight_symbol("▶ ") 
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .bg(if is_active { Color::Blue } else { Color::DarkGray })
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        // Manage which email is selected
+        let mut state = ListState::default();
+        state.select(self.selected_email_index);
+
+        // Render with highlight state
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
     }
 
     fn render_message_pane(&self, area: Rect, buf: &mut Buffer) {
