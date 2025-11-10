@@ -11,8 +11,9 @@ or detach it with `-d`.
 
 You can send an email to the Greenmail server via 
 ```bash 
-python3 test/test_send_mail.py
+cargo run -- --cli send-email --to "user1@example.com"
 ```
+The cli args `--to`, `--subject` and `--body` are optional but if they are provided they will be used to preffil the temp pop up editor. 
 
 and test fetching the top email using
 ```bash 
