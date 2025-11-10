@@ -26,6 +26,9 @@ pub enum Error {
 
     /// Config error
     Config(String),
+
+    /// Invalid Input Error
+    InvalidInput(String),
 }
 
 impl fmt::Display for Error {
@@ -40,6 +43,7 @@ impl fmt::Display for Error {
             Error::Parse(msg) => write!(f, "Parse error: {}", msg),
             Error::Config(msg) => write!(f, "Config error: {}", msg),
             Error::Other(msg) => write!(f, "{}", msg),
+            Error::InvalidInput(msg) => write!(f, "Invalid Input: {}", msg),
         }
     }
 }

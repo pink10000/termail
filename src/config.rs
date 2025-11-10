@@ -16,7 +16,8 @@ use std::fs;
 pub struct TermailConfig {
     pub cli: bool,
     pub default_backend: BackendType,
-    pub email_fetch_count: usize
+    pub email_fetch_count: usize,
+    pub editor: String, 
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -96,7 +97,7 @@ impl Config {
         let backend_config = self.backends.get(&selected_backend)
             .expect(&format!("No configuration found for backend '{}'", selected_backend));
         
-        selected_backend.get_backend(backend_config)
+        selected_backend.get_backend(backend_config, &self.termail.editor)
     }
 
     pub fn get_backend_config(&self, backend_type: &BackendType) -> Option<&BackendConfig> {

@@ -6,16 +6,19 @@ use crate::config::BackendConfig;
 use crate::types::{Command, CommandResult, EmailMessage, Label};
 use async_trait::async_trait;
 use lettre::{Transport, Message, SmtpTransport};
+use tempfile::NamedTempFile;
+use std::io::Write;
 
 pub struct GreenmailBackend {
     host: String,
     port: u16,
     _ssl: bool, // TODO: remove this once we have a proper SSL implementation
     credentials: Credentials,
+    editor: String,
 }
 
 impl GreenmailBackend {
-    pub fn new(config: &BackendConfig) -> Self {
+    pub fn new(config: &BackendConfig, editor: String) -> Self {
         let credentials = config.auth_credentials.clone()
             .expect("Greenmail backend requires credentials in configuration");
         
@@ -24,6 +27,7 @@ impl GreenmailBackend {
             port: config.port,
             _ssl: config.ssl,
             credentials,
+            editor,
         }
     }
 }
@@ -108,6 +112,96 @@ impl GreenmailBackend {
         output.body = body.to_string();
         Ok(output)
     }
+
+
+    /// Opens the provided editor (e.g., vim, code) to allow the user to edit the email draft.
+    /// Prefills the email with any available information (to, subject, body) from cli and writes it as template to a temporary file.
+    /// After the user edits the email and exits the editor, the function reads the updated content and returns the modified `EmailMessage`.
+    fn edit_email_with_prefill(editor: &str, mut draft: EmailMessage) -> std::io::Result<EmailMessage> {
+        
+        // Create a new temp file to be used by editor
+        // File gets deleted once out of scope
+        let mut temp_file = NamedTempFile::new()?;
+
+        // Write draft information into temp file
+        writeln!(temp_file, "To: {}", draft.to)?;
+        writeln!(temp_file, "Subject: {}", draft.subject)?;
+        writeln!(temp_file, "Body:\n{}", draft.body)?;
+
+        // Get temp file path        
+        let temp_file_path = temp_file.path().to_owned();
+
+        // Create command to run editor with path as arg
+        let mut command = std::process::Command::new(editor);
+        if editor.contains("code") {
+            // Add wait arg for vscode to ensure file is saved before returning
+            command.arg("--wait").arg(&temp_file_path);
+        }
+        else {
+            command.arg(&temp_file_path);
+        }
+
+        // Run the editor and check if it was successful
+        let status = command.status()?;
+        if !status.success() {
+            eprintln!("Editor failed with status: {:?}", status);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Editor failed",
+            ));
+        }
+
+        // After the user exits the editor, read contents of temp file
+        let contents = std::fs::read_to_string(&temp_file_path)?;
+        let mut in_body = false;
+        let mut body_lines = Vec::new();
+
+        // Iterate through the lines of the file and parse the email fields
+        // Evertyhing after Body: goes into body_lines
+        for line in contents.lines() {
+            if in_body {
+                body_lines.push(line);
+            } else if line.starts_with("To:") {
+                draft.to = line["To:".len()..].trim().to_string();
+            } else if line.starts_with("Subject:") {
+                draft.subject = line["Subject:".len()..].trim().to_string();
+            } else if line.starts_with("Body:") {
+                in_body = true;
+                body_lines.push(line["Body:".len()..].trim());
+            }
+        }
+        draft.body = body_lines.join("\n");
+        Ok(draft)
+    }
+
+    /// Send an email using the `lettre` library.
+    fn send_email(&self, draft: &EmailMessage) -> Result<CommandResult, Error> {
+        // Build the email message
+        let email = Message::builder()
+            .from("GreenMailTester <greenmail@domain.tester>".parse().unwrap())
+            .to(draft.to.parse().unwrap())
+            .subject(draft.subject.clone())
+            .body(draft.body.clone())
+            .unwrap();
+
+        // Create an SMTP transport (for local testing)
+        let mailer = SmtpTransport::builder_dangerous("127.0.0.1")
+            .port(1025)
+            .build();
+
+        // Send the email
+        match mailer.send(&email) {
+            Ok(_) => {
+                println!("Email sent successfully.");
+                Ok(CommandResult::Empty)
+            },
+            Err(e) => {
+                eprintln!("Failed to send email: {}", e);
+                Err(Error::Connection(e.to_string()))
+            },
+        }
+    }
+
 }
 
 #[async_trait]
@@ -133,27 +227,18 @@ impl Backend for GreenmailBackend {
                 Ok(CommandResult::Labels(labels))
             }
             Command::SendEmail { to, subject, body } => {
-                let email = Message::builder()
-                    .from("GreenMailTester <greenmail@domain.tester>".parse().unwrap())
-                    .to(to.parse().unwrap())
-                    .subject(subject)
-                    .body(body.to_string())
-                    .unwrap();
+                let mut draft = EmailMessage::new();
+                draft.to = to.unwrap_or_default();
+                draft.subject = subject.unwrap_or_default();
+                draft.body = body.unwrap_or_default();
 
-                let mailer = SmtpTransport::builder_dangerous("127.0.0.1")
-                    .port(1025)
-                    .build();
+                let draft = if draft.to.is_empty() || draft.subject.is_empty() || draft.body.is_empty() {
+                    Self::edit_email_with_prefill(&self.editor, draft)?
+                } else {
+                    draft
+                };
 
-                match mailer.send(&email) {
-                    Ok(_) => {
-                        println!("Email sent successfully.");
-                        Ok(CommandResult::Empty)
-                    },
-                    Err(e) => {
-                        eprintln!("Failed to send email: {e}");
-                        Err(Error::Connection(e.to_string()))
-                    },
-                }
+                self.send_email(&draft)
             }
         }
     }

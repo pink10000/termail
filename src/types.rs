@@ -19,11 +19,11 @@ pub enum Command {
     /// Send an email (currently not implemented)
     SendEmail {
         #[arg(short, long)]
-        to: String,
+        to: Option<String>,
         #[arg(short, long)]
-        subject: String,
+        subject:  Option<String>,
         #[arg(short, long)]
-        body: String,
+        body: Option<String>,
     },
 }
 

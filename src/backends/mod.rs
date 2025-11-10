@@ -66,9 +66,9 @@ impl BackendType {
     }
 
     /// Get a trait object for this backend, initialized with its configuration
-    pub fn get_backend(&self, config: &BackendConfig) -> Box<dyn Backend> {
+    pub fn get_backend(&self, config: &BackendConfig, editor: &str) -> Box<dyn Backend> {
         match self {
-            BackendType::GreenMail => Box::new(greenmail::GreenmailBackend::new(config)),
+            BackendType::GreenMail => Box::new(greenmail::GreenmailBackend::new(config, editor.to_string())),
             BackendType::Gmail => Box::new(gmail::GmailBackend::new(config)),
         }
     }
