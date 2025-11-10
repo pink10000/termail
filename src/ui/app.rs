@@ -108,6 +108,16 @@ impl App {
         match key_event.code {
             KeyCode::Esc => self.events.send(AppEvent::Quit),
             KeyCode::Tab => self.events.send(AppEvent::CycleViewState),
+            KeyCode::Down => {
+                if matches!(self.state, ActiveViewState::InboxView) {
+                    self.select_next_email();
+                }
+            }
+            KeyCode::Up => {
+                if matches!(self.state, ActiveViewState::InboxView) {
+                    self.select_previous_email();
+                }
+            }
             _ => {}
         }
         Ok(())
