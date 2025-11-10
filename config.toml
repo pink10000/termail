@@ -1,7 +1,7 @@
 # termail example configuration
 [termail]
 cli = false
-default_backend = "gmail"
+default_backend = "greenmail"
 email_fetch_count = 20
 
 [backends.greenmail]

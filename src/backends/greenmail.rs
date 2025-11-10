@@ -5,6 +5,7 @@ use crate::auth::Credentials;
 use crate::config::BackendConfig;
 use crate::types::{Command, CommandResult, EmailMessage, Label};
 use async_trait::async_trait;
+use lettre::{Transport, Message, SmtpTransport};
 
 pub struct GreenmailBackend {
     host: String,
@@ -131,12 +132,28 @@ impl Backend for GreenmailBackend {
                 let labels = self.list_labels()?;
                 Ok(CommandResult::Labels(labels))
             }
-            Command::SendEmail { to: _to, subject: _subject, body: _body } => {
-                // TODO: Implement email sending
-                Err(Error::Unimplemented {
-                    backend: "greenmail".to_string(),
-                    feature: "send_email".to_string(),
-                })
+            Command::SendEmail { to, subject, body } => {
+                let email = Message::builder()
+                    .from("GreenMailTester <greenmail@domain.tester>".parse().unwrap())
+                    .to(to.parse().unwrap())
+                    .subject(subject)
+                    .body(body.to_string())
+                    .unwrap();
+
+                let mailer = SmtpTransport::builder_dangerous("127.0.0.1")
+                    .port(1025)
+                    .build();
+
+                match mailer.send(&email) {
+                    Ok(_) => {
+                        println!("Email sent successfully.");
+                        Ok(CommandResult::Empty)
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to send email: {e}");
+                        Err(Error::Connection(e.to_string()))
+                    },
+                }
             }
         }
     }

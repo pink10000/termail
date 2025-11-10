@@ -18,3 +18,4 @@ ratatui = { version = "0.29.0", features = ["crossterm"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3.31"
 async-trait = "0.1.89"
+lettre = { version = "0.11", features = ["builder", "smtp-transport"] }
