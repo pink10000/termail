@@ -238,6 +238,10 @@ impl Backend for GreenmailBackend {
                     draft
                 };
 
+                if draft.to.is_empty() {
+                    return Err(Error::InvalidInput("To field cannot be empty".to_string()));
+                }
+
                 self.send_email(&draft)
             }
         }

@@ -69,7 +69,7 @@ impl BackendType {
     pub fn get_backend(&self, config: &BackendConfig, editor: &str) -> Box<dyn Backend> {
         match self {
             BackendType::GreenMail => Box::new(greenmail::GreenmailBackend::new(config, editor.to_string())),
-            BackendType::Gmail => Box::new(gmail::GmailBackend::new(config)),
+            BackendType::Gmail => Box::new(gmail::GmailBackend::new(config, editor.to_string())),
         }
     }
 }
