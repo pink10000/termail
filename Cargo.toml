@@ -20,4 +20,6 @@ futures = "0.3.31"
 async-trait = "0.1.89"
 lettre = { version = "0.11", features = ["builder", "smtp-transport"] }
 tempfile = "3.23.0"
+wasmtime = "38.0.3"
+wit-bindgen = "0.47.0"
 base64 = "0.22.1"

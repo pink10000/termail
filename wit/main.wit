@@ -1,0 +1,11 @@
+package tm:fuck;
+
+interface host {
+	foo: func(x: u32) -> u32;
+	bar: func(s: string) -> string;
+	baz: func() -> string;
+}
+
+world plugin {
+	export host;
+}
