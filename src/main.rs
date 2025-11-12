@@ -4,6 +4,7 @@ pub mod config;
 pub mod auth;
 pub mod types;
 pub mod ui;
+pub mod plugins;
 
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
