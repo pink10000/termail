@@ -3,7 +3,8 @@
 cli = false
 default_backend = "greenmail"
 email_fetch_count = 20
-editor = "code"   # "vim" or "code" for VSCode
+editor = "vim"   # "vim" or "code" for VSCode
+plugins = ["rocketship"] # plugins are not case-sensitive
 
 [backends.greenmail]
 auth_credentials = { username = "user1@example.com", password = "password123"}

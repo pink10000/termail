@@ -5,7 +5,7 @@ pub mod auth;
 pub mod types;
 pub mod ui;
 pub mod plugins;
-
+use plugins::plugins::{PluginManager, TermailHostState};
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
 use types::Command;
@@ -54,6 +54,21 @@ async fn main() {
         std::process::exit(1);
     });
     config.merge(&args);
+    
+    let mut plugin_manager = PluginManager::new().unwrap();
+    let mut host_state = TermailHostState::new();
+    
+    match plugin_manager.load_plugins(
+        &mut host_state,
+        &config.termail.plugins
+    ) {
+        Ok(count) => println!("Loaded successfully: {} plugins", count),
+        Err(e) => {
+            eprintln!("Error loading plugins: {}", e);
+            std::process::exit(1);
+        }
+    }
+
     
     if !config.termail.cli {
         let backend: Box<dyn Backend> = create_authenticated_backend(&config).await;

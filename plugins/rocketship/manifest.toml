@@ -1,0 +1,7 @@
+name = "Rocketship"
+description = "A plugin that adds a rocketship to the email"
+website = "https://github.com/termail/termail"
+
+# Dispatchers are the hooks that the plugin will be called on
+# Any hook that is not listed here will be ignored by termail.
+dispatchers = ["on_email_written"]

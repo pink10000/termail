@@ -244,6 +244,7 @@ impl Backend for GreenmailBackend {
 
                 self.send_email(&draft)
             }
+            Command::Null => Ok(CommandResult::Empty)
         }
     }
 }

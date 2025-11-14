@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use clap::Subcommand;
 use google_gmail1::api::LabelColor;
+
 /// We implement CLI commands via clap subcommands and validate backend compatibility at runtime.
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
@@ -25,6 +26,9 @@ pub enum Command {
         #[arg(short, long)]
         body: Option<String>,
     },
+
+    /// Null command (used for testing plugins))
+    Null
 }
 
 /// Result type for backend commands - can represent different types of outputs

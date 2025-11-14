@@ -29,6 +29,9 @@ pub enum Error {
 
     /// Invalid Input Error
     InvalidInput(String),
+
+    /// Plugin error
+    Plugin(String),
 }
 
 impl fmt::Display for Error {
@@ -44,6 +47,7 @@ impl fmt::Display for Error {
             Error::Config(msg) => write!(f, "Config error: {}", msg),
             Error::Other(msg) => write!(f, "{}", msg),
             Error::InvalidInput(msg) => write!(f, "Invalid Input: {}", msg),
+            Error::Plugin(msg) => write!(f, "Plugin error: {}", msg),
         }
     }
 }

@@ -3,7 +3,6 @@ use crate::config::BackendConfig;
 use crate::types;
 use crate::types::{CommandResult, EmailMessage, MimeType, Command};
 use std::io::Write;
-use google_gmail1::api::{MessagePart, MessagePartBody, MessagePartHeader};
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use tempfile::NamedTempFile;
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
@@ -329,6 +328,7 @@ impl Backend for GmailBackend {
 
                 Ok(CommandResult::Empty)
             }
+            Command::Null => Ok(CommandResult::Empty)
         }
     }
 }

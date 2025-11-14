@@ -18,6 +18,7 @@ pub struct TermailConfig {
     pub default_backend: BackendType,
     pub email_fetch_count: usize,
     pub editor: String, 
+    pub plugins: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

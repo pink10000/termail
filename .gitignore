@@ -30,3 +30,9 @@ target
 # Tokencache
 client_secret.json
 tokencache.json
+
+**/.venv/
+*.wasm
+
+plugins/*/build
+plugins/*/__pycache__

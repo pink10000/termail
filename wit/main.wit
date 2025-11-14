@@ -1,11 +1,21 @@
-package tm:fuck;
+package tm:plugin-system;
 
-interface host {
-	foo: func(x: u32) -> u32;
-	bar: func(s: string) -> string;
-	baz: func() -> string;
+// termail functins that plugins can call
+interface termail-host {
+	// termail will store the invocation-id and call
+	invoke: func(invocation-id: string, event: string) -> string;
 }
 
 world plugin {
-	export host;
+	import termail-host;
+
+	// termail will call this function when a specific event is triggered
+	// on the host side that the plugin has registered for. This is used 
+	// to notify the plugin that an event has occurred.
+	// 
+	// Return true if the plugin handled the event, false otherwise.
+	// termail will not care unless the plugin returns false. 
+	// This short-lived contract ensures the plugin has a reason 
+	// to be querying the host for data.
+	export on-notify: func(invocation-id: string, event: string) -> bool;
 }

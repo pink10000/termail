@@ -1,0 +1,8 @@
+[tool.pyright]
+extraPaths = ["rocketship"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.pylsp-mypy]
+enabled = true
+
