@@ -1,7 +1,7 @@
-name = "Rocketship"
-description = "A plugin that adds a rocketship to the email"
+name = "rocketship"
+description = "A plugin that adds a rocketship emoji to emails before sending"
 website = "https://github.com/termail/termail"
 
-# Dispatchers are the hooks that the plugin will be called on
-# Any hook that is not listed here will be ignored by termail.
-dispatchers = ["on_email_written"]
+# Dispatchers are the events that the plugin will handle
+# Any event not listed here will not be dispatched to this plugin
+dispatchers = ["before_send"]

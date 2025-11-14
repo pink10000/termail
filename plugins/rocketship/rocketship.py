@@ -1,28 +1,22 @@
 # Example wasm plugin that appends a rocketship emoji to every email that is sent 
 
-import wit_world  # pyright: ignore[reportMissingImports]
-from wit_world.exports import Host as HostInterface # pyright: ignore[reportMissingImports]
-from componentize_py_types import Err  # pyright: ignore[reportMissingImports]
-
-def handle(e: Exception) -> Err[str]:
-    message = str(e)
-    if message == "":
-        return Err(f"{type(e).__name__}")
-    else:
-        return Err(f"{type(e).__name__}: {message}")
-
+import bindings.wit_world as wit_world
+import bindings.wit_world.imports.termail_host as termail_host
 
 class WitWorld(wit_world.WitWorld):
-    def rocketship(self, statement: str) -> str:
-        return statement + "🚀"
+    """
+    Rocketship plugin - appends a rocket emoji to emails before sending
+    """
 
-
-class Host(HostInterface):
-    def foo(self, x: int) -> int:
-        return x + 1
-    
-    def bar(self, s: str) -> str:
-        return s + "🚀"
-    
-    def baz(self) -> str:
-        return "🚀"
+    def on_notify(self, invocation_id: str, event: str) -> bool:
+        """
+        Called by termail when an event occurs (e.g., before_send)
+        """
+        print(f"[Rocketship Plugin] Received event: {event} with invocation: {invocation_id}")
+        
+        # We could call back to the host if needed:
+        # result = termail_host.invoke(invocation_id, event)
+        # print(f"Host response: {result}")
+        
+        # Return True to indicate we handled the event
+        return True

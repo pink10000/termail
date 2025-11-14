@@ -36,3 +36,4 @@ tokencache.json
 
 plugins/*/build
 plugins/*/__pycache__
+plugins/*/bindings
