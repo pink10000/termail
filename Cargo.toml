@@ -24,3 +24,6 @@ wasmtime = "38.0.3"
 wit-bindgen = "0.47.0"
 base64 = "0.22.1"
 uuid = { version = "1.18.1", features = ["v4"] }
+
+[profile.dev.package.wasmtime]
+opt-level = 3

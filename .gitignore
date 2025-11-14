@@ -33,6 +33,7 @@ tokencache.json
 
 **/.venv/
 *.wasm
+*.cwasm
 
 plugins/*/build
 plugins/*/__pycache__

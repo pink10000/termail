@@ -15,6 +15,11 @@ then to compile from the `rocketship` directory, you first need to generate the 
 ```bash
 componentize-py -d ../../wit -w plugin bindings bindings/
 componentize-py -d ../../wit -w plugin componentize --stub-wasi rocketship -o plugin.wasm
+
+# OPTIONAL: Pre-compile to native code for MUCH faster loading (HIGHLY RECOMMENDED)
+wasmtime compile plugin.wasm -o plugin.cwasm
 ```
 
-Then add `rocketship` to `termail.plugins` and write an email!
+The `.cwasm` file loads instantly vs ~5-10 seconds for `.wasm`. Termail will automatically prefer `.cwasm` if it exists.
+
+Then add `rocketship` to `termail.plugins` and write an email.4

@@ -91,6 +91,10 @@ impl PluginManager {
     pub fn new() -> Result<Self, Error> {
         let mut config = Config::new();
         config.wasm_component_model(true);
+        
+        // Optimize Cranelift for speed even in debug builds
+        config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+        
         let engine = Engine::new(&config)
             .map_err(|e| Error::Plugin(format!("Failed to create wasmtime engine: {}", e)))?;
         
@@ -176,18 +180,24 @@ impl PluginManager {
         plugin_dir: &Path,
         manifest: PluginManifest,
     ) -> Result<(), Error> {
-        // Look for .wasm file
+        // Prefer pre-compiled .cwasm for much faster loading, fall back to .wasm
+        let cwasm_path = plugin_dir.join("plugin.cwasm");
         let wasm_path = plugin_dir.join("plugin.wasm");
-		println!("WASM path: {:?}", wasm_path);
-        if !wasm_path.exists() {
+        
+        let component = if cwasm_path.exists() {
+            println!("Loading pre-compiled plugin: {:?}", cwasm_path);
+            unsafe { Component::deserialize_file(&self.engine, &cwasm_path) }
+                .map_err(|e| Error::Plugin(format!("Failed to load pre-compiled WASM: {}", e)))?
+        } else if wasm_path.exists() {
+            println!("Loading plugin (JIT compilation): {:?}", wasm_path);
+            Component::from_file(&self.engine, &wasm_path)
+                .map_err(|e| Error::Plugin(format!("Failed to load WASM: {}", e)))?
+        } else {
             return Err(Error::Plugin(format!(
-                "Plugin {} missing plugin.wasm",
+                "Plugin {} missing plugin.wasm or plugin.cwasm",
                 manifest.name
             )));
-        }
-
-		let component = Component::from_file(&self.engine, &wasm_path)
-            .map_err(|e| Error::Plugin(format!("Failed to load WASM: {}", e)))?;
+        };
 
 		Plugin::add_to_linker::<PluginState, HasSelf<PluginState>>(&mut self.linker, |state: &mut PluginState| state)
 			.map_err(|e| Error::Plugin(format!("Failed to add to linker: {}", e)))?;
