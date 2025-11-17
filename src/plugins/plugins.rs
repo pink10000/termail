@@ -27,12 +27,25 @@ pub struct PluginManifest {
     #[serde(default)]
     pub backends: Vec<BackendType>,
     #[serde(default)]
-    pub dispatchers: Vec<String>,
+    pub hooks: Vec<PluginHook>,
+}
+
+#[derive(Debug, serde::Deserialize, Clone, Eq, Hash, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginHook {
+    #[serde(rename = "before_send")]
+    BeforeSend,
+    #[serde(rename = "after_send")]
+    AfterSend,
+    #[serde(rename = "before_receive")]
+    BeforeReceive,
+    #[serde(rename = "after_receive")]
+    AfterReceive,
 }
 
 /// Plugin Manager - owns all loaded plugins
 pub struct PluginManager {
-    plugins: HashMap<String, LoadedPlugin>,
+    plugins: HashMap<PluginHook, Vec<LoadedPlugin>>,
     engine: Engine,
 	linker: Linker<PluginState>,
     host_state: TermailHostState,
@@ -48,10 +61,9 @@ impl std::fmt::Debug for PluginManager {
 /// 
 /// This is a termail-specific struct that is used to store the plugin's state.
 pub struct LoadedPlugin {
+    // Not sure if we actually need the name of the plugin for anything. Maybe for
+    // logging/debugging purposes in the future?
     pub name: String,
-    pub description: String,
-    pub dispatchers: Vec<String>,
-    _store: Store<PluginState>,
     _instance: Plugin,
 }
 
@@ -118,57 +130,52 @@ impl PluginManager {
         })
     }
 
-    /// Load plugins from directories, filtered by enabled list
+    /// Load plugins from directories
+    /// 
+    /// If no plugin directory is found, nothing is loaded.
     pub fn load_plugins(
         &mut self,
         enabled_plugins: &[String],
     ) -> Result<u32, Error> {
-        // Check .config/plugins first, then ./plugins
-        let search_dirs = vec![
-            PathBuf::from(".config/termail/plugins"),
-            PathBuf::from("./plugins"),
-        ];
+        // Check .config/termail/plugins first, fall back to ./plugins
+        let plugin_dir = PathBuf::from(".config/termail/plugins");
+        let plugin_dir = if plugin_dir.exists() {
+            plugin_dir
+        } else {
+            PathBuf::from("./plugins")
+        };
 
-		let mut loaded_plugins = 0;
-        for dir in search_dirs {
-			if !dir.exists() {
+        if !plugin_dir.exists() {
+            println!("No plugin directory found, skipping plugin loading");
+            return Ok(0);
+        }
+
+        let mut loaded_plugins = 0;
+        
+        for entry in std::fs::read_dir(&plugin_dir)
+            .map_err(|e| Error::Plugin(
+                format!("Failed to read plugin dir {:?}: {}", plugin_dir, e))
+            )?
+            .filter_map(|entry| entry.ok())
+        {
+            let plugin_dir = entry.path();
+            let manifest_path = plugin_dir.join("manifest.toml");
+            if !manifest_path.exists() {
                 continue;
             }
+            let manifest = self.load_manifest(&manifest_path)
+                .map_err(|e| Error::Plugin(format!("Failed to load manifest for plugin {:?}: {}", manifest_path, e)))?;
 
-            // Scan for plugin directories
-            for entry in std::fs::read_dir(&dir)
-                .map_err(|e| Error::Plugin(format!("Failed to read dir {:?}: {}", dir, e)))? 
-            {
-                let entry = entry.map_err(|e| Error::Plugin(format!("Failed to read entry: {}", e)))?;
-                let path = entry.path();
+            let Some(manifest) = manifest else {
+                continue;
+            };
 
-				if !path.is_dir() {
-					continue;
-				}
-				let manifest_path = path.join("manifest.toml");
-				
-				// A plugin is defined by its manifest.toml file. If it doesn't exsit,
-				// then it is not a plugin.
-				if !manifest_path.exists() {
-					continue;
-				}
-
-				match self.load_manifest(&manifest_path) {
-					Ok(manifest) => {
-						if enabled_plugins.contains(&manifest.name.to_lowercase()) {
-							println!("Loading plugin: {}", manifest.name);
-							self.load_plugin(&path, manifest)?;
-							loaded_plugins += 1;
-						} else {
-							println!("Plugin {} is not enabled, skipping", manifest.name);
-						}
-					}
-					Err(e) => {
-						println!("Failed to load manifest: {:?}", manifest_path);
-						return Err(Error::Plugin(format!(
-							"Failed to load manifest ({:?}), with error: {}", manifest_path, e)));
-					}
-				}
+            if enabled_plugins.contains(&manifest.name.to_lowercase()) {
+                println!("Loading plugin: {}", manifest.name);
+                self.load_plugin(&plugin_dir, manifest)?;
+                loaded_plugins += 1;
+            } else {
+                println!("Plugin {} is not enabled, skipping", manifest.name);
             }
         }
 
@@ -176,13 +183,27 @@ impl PluginManager {
     }
 
     /// Load a single plugin manifest
-    fn load_manifest(&self, manifest_path: &Path) -> Result<PluginManifest, Error> {
+    /// 
+    /// If a plugin has no backends it can operate on, it should not be loaded.
+    fn load_manifest(&self, manifest_path: &Path) -> Result<Option<PluginManifest>, Error> {
         let content = std::fs::read_to_string(manifest_path)
             .map_err(|e| Error::Plugin(format!("Failed to read manifest: {}", e)))?;
         
-        toml::from_str(&content)
-            .map_err(|e| Error::Plugin(format!("Failed to parse manifest: {}", e)))
+        let manifest: Result<PluginManifest, Error> = toml::from_str(&content)
+            .map_err(|e| Error::Plugin(format!("Failed to parse manifest: {}", e)));
+    
+        match manifest {
+            Ok(m) => {
+                if m.backends.is_empty() {
+                    println!("Warning! Plugin {} has an empty \"backends\" field, and will NOT be loaded.", m.name);
+                    return Ok(None)
+                }
+                return Ok(Some(m))
+            }
+            Err(e) => Err(e)
+        }
     }
+
 
     /// Load a single plugin from directory
     fn load_plugin(
@@ -212,19 +233,28 @@ impl PluginManager {
 		Plugin::add_to_linker::<PluginState, HasSelf<PluginState>>(&mut self.linker, |state: &mut PluginState| state)
 			.map_err(|e| Error::Plugin(format!("Failed to add to linker: {}", e)))?;
 
-		let mut store = Store::new(&self.engine, PluginState { invocation_count: 0, host_state: self.host_state.clone()});
-		let instance = Plugin::instantiate(&mut store, &component, &self.linker)
-			.map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?;
+		let mut store = Store::new(&self.engine, PluginState { 
+            invocation_count: 0, 
+            host_state: self.host_state.clone()
+        });
 
-        let loaded_plugin = LoadedPlugin {
-            name: manifest.name.clone(),
-            description: manifest.description,
-            dispatchers: manifest.dispatchers,
-            _store: store,
-            _instance: instance,
-        };
-
-        self.plugins.insert(manifest.name, loaded_plugin);
+        for hook in manifest.hooks {
+            self.plugins.entry(hook).or_insert(Vec::new()).push(LoadedPlugin {
+                name: manifest.name.clone(),
+                _instance: Plugin::instantiate(
+                    &mut store,
+                    &component,
+                    &self.linker,
+                )
+                .map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?,
+            });
+        }
         Ok(())
+
     }
+
+    // pub fn dispatch_event(&self, hook: PluginHook, backend: BackendType, event: String) -> Result<String, Error> {
+        
+    // }
+
 }

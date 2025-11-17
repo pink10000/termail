@@ -326,6 +326,10 @@ impl Backend for GmailBackend {
 
                 println!("Email sent successfully! Message ID: {:?}", result.1.id);
 
+                // if let Some(plugin_manager) = plugin_manager {
+                //     plugin_manager.dispatch_event
+                // }
+
                 Ok(CommandResult::Empty)
             }
             Command::Null => Ok(CommandResult::Empty)
