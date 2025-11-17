@@ -2,6 +2,10 @@ name = "rocketship"
 description = "A plugin that adds a rocketship emoji to emails before sending"
 website = "https://github.com/termail/termail"
 
+# Backends are the backends that the plugin will handle
+# If no backends are listed, the plugin will handle all backends
+backends = []
+
 # Dispatchers are the events that the plugin will handle
 # Any event not listed here will not be dispatched to this plugin
 dispatchers = ["before_send"]

@@ -4,14 +4,15 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent}, DefaultTerminal
 };
 
-use crate::{types::{Command, EmailMessage, Label}, ui::event::AppEvent};
+use crate::types::{Command, EmailMessage, Label, CommandResult};
+use crate::ui::event::AppEvent;
 use crate::config::Config;
 use crate::error::Error;
 use super::event::{Event, EventHandler};
 use crate::backends::Backend;
-use crate::types::CommandResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::plugins::plugins::PluginManager;
 
 #[derive(Clone, Debug)]
 pub enum ActiveViewState {
@@ -20,7 +21,7 @@ pub enum ActiveViewState {
     MessageView,
 }
 
-pub struct App {
+pub struct App<'a> {
     pub state: ActiveViewState,
     pub running: bool,
     pub events: EventHandler, 
@@ -39,10 +40,19 @@ pub struct App {
     pub selected_email_index: Option<usize>,
     /// Name of the currently selected folder
     pub selected_folder: String,
+    /// Plugin manager for executing plugins
+    /// 
+    /// Currently this has no use, but in the future if someone wants a plugin to be able
+    /// to something to the UI, this would be the place to do it.
+    pub plugin_manager: &'a mut PluginManager,
 }
 
-impl App {
-    pub fn new(config: Config, backend: Box<dyn Backend>) -> Self {
+impl<'a> App<'a> {
+    pub fn new(
+        config: Config, 
+        backend: Box<dyn Backend>,
+        plugin_manager: &'a mut PluginManager,
+    ) -> Self {
         let backend = Arc::new(Mutex::new(backend));
         let events = EventHandler::new();
         
@@ -70,6 +80,7 @@ impl App {
             tick_counter: 0,
             selected_email_index: Some(0),  // Start with first email selected
             selected_folder: "INBOX".to_string(),
+            plugin_manager: plugin_manager,
         }
     }
 

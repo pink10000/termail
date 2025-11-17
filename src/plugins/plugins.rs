@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::backends::BackendType;
+
 mod bindings {
     wasmtime::component::bindgen!({
         path: "wit/main.wit",
@@ -23,6 +25,8 @@ pub struct PluginManifest {
     #[serde(default)]
     pub website: String,
     #[serde(default)]
+    pub backends: Vec<BackendType>,
+    #[serde(default)]
     pub dispatchers: Vec<String>,
 }
 
@@ -31,6 +35,13 @@ pub struct PluginManager {
     plugins: HashMap<String, LoadedPlugin>,
     engine: Engine,
 	linker: Linker<PluginState>,
+    host_state: TermailHostState,
+}
+
+impl std::fmt::Debug for PluginManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PluginManager {{ plugins: {:?}, engine: {:?} }}", self.plugins.keys(), self.engine)
+    }
 }
 
 /// A loaded plugin with its runtime state
@@ -103,13 +114,13 @@ impl PluginManager {
             plugins: HashMap::new(),
             engine,
 			linker,
+			host_state: TermailHostState::new(),
         })
     }
 
     /// Load plugins from directories, filtered by enabled list
     pub fn load_plugins(
         &mut self,
-        host_state: &mut TermailHostState,
         enabled_plugins: &[String],
     ) -> Result<u32, Error> {
         // Check .config/plugins first, then ./plugins
@@ -146,7 +157,7 @@ impl PluginManager {
 					Ok(manifest) => {
 						if enabled_plugins.contains(&manifest.name.to_lowercase()) {
 							println!("Loading plugin: {}", manifest.name);
-							self.load_plugin(host_state, &path, manifest)?;
+							self.load_plugin(&path, manifest)?;
 							loaded_plugins += 1;
 						} else {
 							println!("Plugin {} is not enabled, skipping", manifest.name);
@@ -176,7 +187,6 @@ impl PluginManager {
     /// Load a single plugin from directory
     fn load_plugin(
         &mut self,
-        host_state: &mut TermailHostState,
         plugin_dir: &Path,
         manifest: PluginManifest,
     ) -> Result<(), Error> {
@@ -202,7 +212,7 @@ impl PluginManager {
 		Plugin::add_to_linker::<PluginState, HasSelf<PluginState>>(&mut self.linker, |state: &mut PluginState| state)
 			.map_err(|e| Error::Plugin(format!("Failed to add to linker: {}", e)))?;
 
-		let mut store = Store::new(&self.engine, PluginState { invocation_count: 0, host_state: host_state.clone() });
+		let mut store = Store::new(&self.engine, PluginState { invocation_count: 0, host_state: self.host_state.clone()});
 		let instance = Plugin::instantiate(&mut store, &component, &self.linker)
 			.map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?;
 

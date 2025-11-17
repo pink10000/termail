@@ -5,7 +5,7 @@ pub mod auth;
 pub mod types;
 pub mod ui;
 pub mod plugins;
-use plugins::plugins::{PluginManager, TermailHostState};
+use plugins::plugins::PluginManager;
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
 use types::Command;
@@ -56,24 +56,23 @@ async fn main() {
     config.merge(&args);
     
     let mut plugin_manager = PluginManager::new().unwrap();
-    let mut host_state = TermailHostState::new();
     
-    match plugin_manager.load_plugins(
-        &mut host_state,
-        &config.termail.plugins
-    ) {
+    match plugin_manager.load_plugins(&config.termail.plugins) {
         Ok(count) => println!("Loaded successfully: {} plugins", count),
         Err(e) => {
             eprintln!("Error loading plugins: {}", e);
             std::process::exit(1);
         }
     }
-
     
     if !config.termail.cli {
         let backend: Box<dyn Backend> = create_authenticated_backend(&config).await;
         let terminal = ratatui::init();
-        let tui_result = App::new(config, backend).run(terminal).await;
+        let tui_result = App::new(
+            config, 
+            backend,
+            &mut plugin_manager
+        ).run(terminal).await;
         match tui_result {
             Ok(_) => println!("TUI exited successfully"),
             Err(e) => eprintln!("TUI error: {}", e),
