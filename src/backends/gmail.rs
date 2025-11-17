@@ -1,7 +1,6 @@
 use super::{Backend, Error};
 use crate::config::BackendConfig;
-use crate::types;
-use crate::types::{CommandResult, EmailMessage, MimeType, Command};
+use crate::types::{CommandResult, EmailMessage, MimeType, Command, Label};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use tempfile::NamedTempFile;
@@ -9,6 +8,7 @@ use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
 use futures::future;
+use crate::plugins::plugins::PluginManager;
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
@@ -129,7 +129,7 @@ impl GmailBackend {
         Ok(emails)
     }
 
-    async fn list_labels(&self) -> Result<Vec<types::Label>, Error> {
+    async fn list_labels(&self) -> Result<Vec<Label>, Error> {
         let result = self.hub.as_ref().unwrap()
             .users()
             .labels_list("me")
@@ -155,13 +155,13 @@ impl GmailBackend {
             })
             .collect::<Vec<_>>();
         let detailed_labels: Vec<google_gmail1::api::Label> = future::join_all(futures).await;
-        let output = detailed_labels.iter().map(|label| types::Label {
+        let output = detailed_labels.iter().map(|label| Label {
             color: label.color.clone(),
             id: label.id.clone(),
             messages_total: label.messages_total.map(|x| x as usize),
             messages_unread: label.messages_unread.map(|x| x as usize),
             name: label.name.clone(),
-        }).collect::<Vec<types::Label>>();
+        }).collect::<Vec<Label>>();
         
         Ok(output)
     }
@@ -271,7 +271,7 @@ impl Backend for GmailBackend {
         Ok(())
     }
 
-    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {        
+    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {        
         match cmd {
             Command::FetchInbox { count } => {
                 let emails = self.fetch_inbox_emails(count).await.unwrap();

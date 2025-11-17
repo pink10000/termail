@@ -53,7 +53,7 @@ struct AppLayouts {
     border2: Rect,
 }
 
-impl<'a> App<'a> {
+impl App {
     /// Calculate the optimal folder pane width based on loaded labels
     /// Returns the width in characters, or None if labels aren't loaded yet
     fn calculate_folder_pane_width(&self) -> Option<u16> {
@@ -297,7 +297,7 @@ impl<'a> App<'a> {
 
 }
 
-impl<'a> Widget for &App<'a> {
+impl Widget for &App {
     /// Renders the user interface widgets.
     /// 
     /// The size of the layout should eventually be controlled by the config. 

@@ -6,14 +6,13 @@ use crate::error::Error;
 use crate::config::BackendConfig;
 use crate::types::{Command, CommandResult};
 use async_trait::async_trait;
-
+use crate::plugins::plugins::PluginManager;
 use std::fmt;
 
 #[async_trait]
-pub trait Backend: Send {
-    fn needs_oauth(&self) -> bool {
-        false
-    }
+pub trait Backend: Send {    
+    /// Check if this backend requires OAuth2 authentication
+    fn needs_oauth(&self) -> bool;
 
     /// Perform authentication (if needed). This is a sync wrapper that may spawn async tasks.
     /// Returns Ok(()) if authentication succeeded or wasn't needed.
@@ -22,7 +21,9 @@ pub trait Backend: Send {
     }
 
     /// Execute a command and return a structured result
-    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error>;
+    /// 
+    /// The plugin_manager is optional - only pass it for commands that need plugin dispatch
+    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
@@ -57,14 +58,6 @@ impl fmt::Display for BackendType {
 }
 
 impl BackendType {
-    /// Check if this backend type requires OAuth2 authentication
-    pub fn needs_oauth(&self) -> bool {
-        match self {
-            BackendType::GreenMail => false,
-            BackendType::Gmail => true,
-        }
-    }
-
     /// Get a trait object for this backend, initialized with its configuration
     pub fn get_backend(&self, config: &BackendConfig, editor: &str) -> Box<dyn Backend> {
         match self {

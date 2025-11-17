@@ -15,10 +15,9 @@ use ui::app::App;
 use std::path::PathBuf;
 
 async fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
-    let backend_type = config.termail.default_backend;
     let mut backend: Box<dyn Backend> = config.get_backend();
     
-    if backend_type.needs_oauth() {
+    if backend.needs_oauth() {
         if let Err(e) = backend.authenticate().await {
             eprintln!("Authentication failed: {}", e);
             std::process::exit(1);
@@ -71,7 +70,7 @@ async fn main() {
         let tui_result = App::new(
             config, 
             backend,
-            &mut plugin_manager
+            plugin_manager
         ).run(terminal).await;
         match tui_result {
             Ok(_) => println!("TUI exited successfully"),
@@ -89,10 +88,9 @@ async fn main() {
         Some(_) => {}
     }
         
-    let backend_type = config.termail.default_backend;
     let mut backend: Box<dyn Backend> = config.get_backend();
     
-    if backend_type.needs_oauth() {
+    if backend.needs_oauth() {
         if let Err(e) = backend.authenticate().await {
             eprintln!("Authentication failed: {}", e);
             std::process::exit(1);
@@ -100,7 +98,11 @@ async fn main() {
     }
     
     // Execute the command using the selected backend
-    let result = match backend.do_command(args.command.unwrap()).await {
+    // Pass Some(&mut plugin_manager) if plugins might be needed, None otherwise
+    let result = match backend.do_command(
+        args.command.unwrap(), 
+        Some(&mut plugin_manager)
+    ).await {
         Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);

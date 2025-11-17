@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use lettre::{Transport, Message, SmtpTransport};
 use tempfile::NamedTempFile;
 use std::io::Write;
+use crate::plugins::plugins::PluginManager;
 
 pub struct GreenmailBackend {
     host: String,
@@ -210,7 +211,7 @@ impl Backend for GreenmailBackend {
         false 
     }
 
-    async fn do_command(&self, cmd: Command) -> Result<CommandResult, Error> {
+    async fn do_command(&self, cmd: Command, _plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {
         match cmd {
             Command::FetchInbox { count } => {
                 let emails = self.fetch_inbox_emails(count)?;

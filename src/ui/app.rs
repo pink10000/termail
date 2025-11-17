@@ -21,7 +21,7 @@ pub enum ActiveViewState {
     MessageView,
 }
 
-pub struct App<'a> {
+pub struct App {
     pub state: ActiveViewState,
     pub running: bool,
     pub events: EventHandler, 
@@ -41,19 +41,17 @@ pub struct App<'a> {
     /// Name of the currently selected folder
     pub selected_folder: String,
     /// Plugin manager for executing plugins
-    /// 
-    /// Currently this has no use, but in the future if someone wants a plugin to be able
-    /// to something to the UI, this would be the place to do it.
-    pub plugin_manager: &'a mut PluginManager,
+    pub plugin_manager: Arc<Mutex<PluginManager>>,
 }
 
-impl<'a> App<'a> {
+impl App {
     pub fn new(
         config: Config, 
         backend: Box<dyn Backend>,
-        plugin_manager: &'a mut PluginManager,
+        plugin_manager: PluginManager,
     ) -> Self {
         let backend = Arc::new(Mutex::new(backend));
+        let plugin_manager = Arc::new(Mutex::new(plugin_manager));
         let events = EventHandler::new();
         
         // Spawn initial label fetch
@@ -80,7 +78,7 @@ impl<'a> App<'a> {
             tick_counter: 0,
             selected_email_index: Some(0),  // Start with first email selected
             selected_folder: "INBOX".to_string(),
-            plugin_manager: plugin_manager,
+            plugin_manager,
         }
     }
 
@@ -204,10 +202,10 @@ impl<'a> App<'a> {
         count: usize,
     ) {
         tokio::spawn(async move {
-            // Acquire lock and fetch emails
+            // Acquire lock and fetch emails (no plugin manager needed for basic fetch)
             let result = {
                 let backend_guard = backend.lock().await;
-                backend_guard.do_command(Command::FetchInbox { count }).await
+                backend_guard.do_command(Command::FetchInbox { count }, None).await
             };
             
             match result {
@@ -237,7 +235,7 @@ impl<'a> App<'a> {
         tokio::spawn(async move {
             let result = {
                 let backend_guard = backend.lock().await;
-                backend_guard.do_command(Command::ListLabels).await
+                backend_guard.do_command(Command::ListLabels, None).await
             };
 
             match result {
