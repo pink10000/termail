@@ -1,0 +1,4 @@
+name = "signature-rs"
+description = "Appends a signature to outgoing emails."
+backends = ["gmail"]
+hooks = ["before_send"]
