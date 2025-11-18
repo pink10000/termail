@@ -316,7 +316,7 @@ impl Backend for GmailBackend {
                         PluginHook::BeforeSend, 
                         BackendType::Gmail, 
                         draft.body.clone()
-                    )?;
+                    ).await?;
                     draft.body = updated_body;
                 }
 

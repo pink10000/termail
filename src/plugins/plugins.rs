@@ -1,5 +1,6 @@
-use wasmtime::component::{Component, Linker, HasSelf};
+use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView, WasiCtxView, DirPerms, FilePerms};
 use crate::error::Error;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -14,7 +15,6 @@ mod bindings {
     });
 }
 
-use bindings::tm::plugin_system::termail_host;
 use bindings::Plugin;
 
 /// Manifest structure for plugin.toml
@@ -89,36 +89,17 @@ impl TermailHostState {
 /// 
 /// This is specific to wasmtime and is used to store the plugin's state.
 struct PluginState {
-    invocation_count: u32,
-    host_state: TermailHostState,
+    wasi_ctx: WasiCtx,
+    wasi_table: ResourceTable,
 }
 
-/// Implement the `termail-host` interface trait
-impl termail_host::Host for PluginState {
-    fn invoke(&mut self, invocation_id: String, event: String) -> String {
-        self.invocation_count += 1;
-        invoke(&self.host_state, invocation_id, event)
-    }
-}
-
-/// Host function called by plugins to update event data
-/// 
-/// When a plugin processes an event, it calls this function with:
-/// - invocation_id: The ID provided in on_notify
-/// - event: The modified event data
-/// 
-/// This updates the stored event data so the host can retrieve it after on_notify returns
-pub fn invoke(host_state: &TermailHostState, invocation_id: String, event: String) -> String {
-    let mut invocations = host_state.active_invocations.lock().unwrap();
-    
-    if invocations.contains_key(&invocation_id) {
-        // Update the event data with the plugin's modified version
-        invocations.insert(invocation_id.clone(), event.clone());
-        println!("[Host] Plugin updated event via invoke: {}", invocation_id);
-        format!("OK: Event updated")
-    } else {
-        eprintln!("[Host] Invalid invocation_id: {}", invocation_id);
-        "Error: Invalid invocation_id".to_string()
+/// Implement WasiView to provide WASI support to plugins
+impl WasiView for PluginState {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi_ctx,
+            table: &mut self.wasi_table,
+        }
     }
 }
 
@@ -126,14 +107,19 @@ impl PluginManager {
     pub fn new() -> Result<Self, Error> {
         let mut config = Config::new();
         config.wasm_component_model(true);
-        
+        // Don't enable async_support - we'll use spawn_blocking when needed
         // Optimize Cranelift for speed even in debug builds
         config.cranelift_opt_level(wasmtime::OptLevel::Speed);
         
         let engine = Engine::new(&config)
             .map_err(|e| Error::Plugin(format!("Failed to create wasmtime engine: {}", e)))?;
         
-		let linker = Linker::new(&engine);
+		let mut linker = Linker::new(&engine);
+        
+        // Add WASI support to the linker (preview2, sync version wrapped in spawn_blocking)
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
+            .map_err(|e| Error::Plugin(format!("Failed to add WASI to linker: {}", e)))?;
+        
         Ok(Self {
             plugins: HashMap::new(),
             engine,
@@ -241,14 +227,27 @@ impl PluginManager {
                 manifest.name
             )));
         };
-
-		Plugin::add_to_linker::<PluginState, HasSelf<PluginState>>(&mut self.linker, |state: &mut PluginState| state)
-			.map_err(|e| Error::Plugin(format!("Failed to add to linker: {}", e)))?;
         
         for hook in manifest.hooks {
+            let mut wasi_builder = WasiCtxBuilder::new();
+            wasi_builder.inherit_stdio();
+            wasi_builder.inherit_env();
+            
+            // Allow the plugin to access the current directory and root (for Python imports)
+            let current_dir = std::env::current_dir()
+                .map_err(|e| Error::Plugin(format!("Failed to get current directory: {}", e)))?;
+            wasi_builder.preopened_dir(&current_dir, "/", DirPerms::all(), FilePerms::all())
+                .map_err(|e| Error::Plugin(format!("Failed to preopen directory: {}", e)))?;
+            
+            // Also try mapping to "."
+            wasi_builder.preopened_dir(&current_dir, ".", DirPerms::all(), FilePerms::all())
+                .map_err(|e| Error::Plugin(format!("Failed to preopen directory: {}", e)))?;
+            
+            let wasi_ctx = wasi_builder.build();
+            
             let mut store = Store::new(&self.engine, PluginState { 
-                invocation_count: 0, 
-                host_state: self.host_state.clone()
+                wasi_ctx,
+                wasi_table: ResourceTable::new(),
             });
 
             let instance = Plugin::instantiate(&mut store, &component, &self.linker)
@@ -272,15 +271,7 @@ impl PluginManager {
     /// Dispatch an event to the appropriate plugins
     /// 
     /// Plugins are called in sequence, each receiving the output of the previous plugin.
-    /// 
-    /// # Flow
-    /// 1. Host stores initial event data with a unique invocation_id
-    /// 2. Host calls `plugin.on_notify(invocation_id, event)`
-    /// 3. Plugin processes event and calls `host.invoke(invocation_id, modified_event)` 
-    /// 4. Host's `invoke()` updates the stored event data
-    /// 5. Host retrieves the modified event and passes it to the next plugin
-    /// 6. Final modified event is returned
-    pub fn dispatch_event(&mut self, hook: PluginHook, _backend: BackendType, event: String) -> Result<String, Error> {
+    pub async fn dispatch_event(&mut self, hook: PluginHook, _backend: BackendType, event: String) -> Result<String, Error> {
         // Get plugins for this hook
         let plugins = match self.plugins.get_mut(&hook) {
             Some(plugins) if !plugins.is_empty() => plugins,
@@ -293,41 +284,17 @@ impl PluginManager {
         for plugin in plugins {
             let invocation_id = uuid::Uuid::new_v4().to_string();
 
-            // Step 1: Store the current event data in the invocation registry
-            self.host_state
-                .active_invocations
-                .lock()
-                .unwrap()
-                .insert(invocation_id.clone(), current_event.clone());
-
-            // Step 2: Call the plugin's on-notify function
-            // The plugin will call invoke(invocation_id, modified_event) to update the data
-            let handled = plugin.instance
-                .call_on_notify(&mut plugin.store, &invocation_id, &current_event)
-                .map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
-
-            if !handled {
-                eprintln!("Warning: Plugin {} returned false for hook {:?}", plugin.name, hook);
-            }
-
-            // Step 5: Retrieve the (potentially modified) event data
-            // The plugin should have called invoke() which updated this
-            let invocations = self.host_state.active_invocations.lock().unwrap();
-            current_event = invocations
-                .get(&invocation_id)
-                .ok_or_else(|| Error::Plugin(format!("Plugin {} lost invocation data", plugin.name)))?
-                .clone();
-            drop(invocations);
-
-            // Clean up the invocation
-            self.host_state
-                .active_invocations
-                .lock()
-                .unwrap()
-                .remove(&invocation_id);
+            // Call the plugin's on-notify function and get the modified event back
+            // Use block_in_place to allow sync WASI calls without crossing thread boundaries
+            current_event = tokio::task::block_in_place(|| {
+                plugin.instance
+                    .call_on_notify(&mut plugin.store, &invocation_id, &current_event)
+            }).map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
+            
+            println!("[Host] Plugin {} processed event", plugin.name);
         }
 
-        // Step 6: Return the final modified event
+        // Return the final modified event
         Ok(current_event)
     }
 
