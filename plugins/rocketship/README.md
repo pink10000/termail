@@ -13,6 +13,7 @@ uv pip install componentize-py wasmtime
 
 then to compile from the `rocketship` directory, you first need to generate the wasm bindings, then compile to wasm.
 ```bash
+rm -rf bindings
 componentize-py -d ../../wit -w plugin bindings bindings/
 componentize-py -d ../../wit -w plugin componentize --stub-wasi rocketship -o plugin.wasm
 

@@ -12,11 +12,22 @@ class WitWorld(wit_world.WitWorld):
         """
         Called by termail when an event occurs (e.g., before_send)
         """
-        print(f"[Rocketship Plugin] Received event: {event} with invocation: {invocation_id}")
+        # print(f"[Rocketship Plugin] Received event: {event} with invocation: {invocation_id}")
         
         # We could call back to the host if needed:
         # result = termail_host.invoke(invocation_id, event)
         # print(f"Host response: {result}")
-        
+        self.invoke(invocation_id, event)
         # Return True to indicate we handled the event
         return True
+
+
+    def invoke(self, invocation_id: str, event: str) -> str:
+        """
+        Called this function in termail to update the event data
+        """
+        # print(f"[Rocketship Plugin] Invoking with invocation: {invocation_id} and event: {event}")
+
+        event = event + "🚀"
+        termail_host.invoke(invocation_id, event)
+        return event

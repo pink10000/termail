@@ -64,13 +64,17 @@ pub struct LoadedPlugin {
     // Not sure if we actually need the name of the plugin for anything. Maybe for
     // logging/debugging purposes in the future?
     pub name: String,
-    _instance: Plugin,
+    store: Store<PluginState>,
+    instance: Plugin,
 }
 
 /// Global Host State shared across all plugins
 #[derive(Clone)]
 pub struct TermailHostState {
-    pub active_invocations: Arc<Mutex<HashMap<String, String>>>, // invocation_id -> event
+    pub active_invocations: Arc<Mutex<HashMap<String, String>>>, 
+    // invocation_id -> event
+    // we probably do not need to wrap this in an `Arc` and `Mutex` 
+    // since it is only used within the same thread.
 }
 
 impl TermailHostState {
@@ -97,17 +101,25 @@ impl termail_host::Host for PluginState {
     }
 }
 
-/// Host Logic
+/// Host function called by plugins to update event data
+/// 
+/// When a plugin processes an event, it calls this function with:
+/// - invocation_id: The ID provided in on_notify
+/// - event: The modified event data
+/// 
+/// This updates the stored event data so the host can retrieve it after on_notify returns
 pub fn invoke(host_state: &TermailHostState, invocation_id: String, event: String) -> String {
-    let invocations = host_state.active_invocations.lock().unwrap();
-    if let Some(expected_event) = invocations.get(&invocation_id) {
-        if expected_event == &event {
-            println!("[Host] Valid 'invoke' call for event: {}", event);
-            return format!("Processed: {}", event);
-        }
+    let mut invocations = host_state.active_invocations.lock().unwrap();
+    
+    if invocations.contains_key(&invocation_id) {
+        // Update the event data with the plugin's modified version
+        invocations.insert(invocation_id.clone(), event.clone());
+        println!("[Host] Plugin updated event via invoke: {}", invocation_id);
+        format!("OK: Event updated")
+    } else {
+        eprintln!("[Host] Invalid invocation_id: {}", invocation_id);
+        "Error: Invalid invocation_id".to_string()
     }
-    println!("[Host] Invalid invocation_id or event mismatch");
-    "Error: Invalid invocation".to_string()
 }
 
 impl PluginManager {
@@ -232,29 +244,91 @@ impl PluginManager {
 
 		Plugin::add_to_linker::<PluginState, HasSelf<PluginState>>(&mut self.linker, |state: &mut PluginState| state)
 			.map_err(|e| Error::Plugin(format!("Failed to add to linker: {}", e)))?;
-
-		let mut store = Store::new(&self.engine, PluginState { 
-            invocation_count: 0, 
-            host_state: self.host_state.clone()
-        });
-
+        
         for hook in manifest.hooks {
-            self.plugins.entry(hook).or_insert(Vec::new()).push(LoadedPlugin {
-                name: manifest.name.clone(),
-                _instance: Plugin::instantiate(
-                    &mut store,
-                    &component,
-                    &self.linker,
-                )
-                .map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?,
+            let mut store = Store::new(&self.engine, PluginState { 
+                invocation_count: 0, 
+                host_state: self.host_state.clone()
             });
-        }
-        Ok(())
 
+            let instance = Plugin::instantiate(&mut store, &component, &self.linker)
+                .map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?;
+
+            let loaded_plugin = LoadedPlugin {
+                name: manifest.name.clone(),
+                store,
+                instance,
+            };
+
+            self.plugins
+                .entry(hook)
+                .or_insert_with(Vec::new)
+                .push(loaded_plugin);
+        }
+
+        Ok(())
     }
 
-    // pub fn dispatch_event(&self, hook: PluginHook, backend: BackendType, event: String) -> Result<String, Error> {
-        
-    // }
+    /// Dispatch an event to the appropriate plugins
+    /// 
+    /// Plugins are called in sequence, each receiving the output of the previous plugin.
+    /// 
+    /// # Flow
+    /// 1. Host stores initial event data with a unique invocation_id
+    /// 2. Host calls `plugin.on_notify(invocation_id, event)`
+    /// 3. Plugin processes event and calls `host.invoke(invocation_id, modified_event)` 
+    /// 4. Host's `invoke()` updates the stored event data
+    /// 5. Host retrieves the modified event and passes it to the next plugin
+    /// 6. Final modified event is returned
+    pub fn dispatch_event(&mut self, hook: PluginHook, _backend: BackendType, event: String) -> Result<String, Error> {
+        // Get plugins for this hook
+        let plugins = match self.plugins.get_mut(&hook) {
+            Some(plugins) if !plugins.is_empty() => plugins,
+            _ => return Ok(event), // No plugins for this hook
+        };
+
+        let mut current_event = event;
+
+        // Call each plugin in sequence
+        for plugin in plugins {
+            let invocation_id = uuid::Uuid::new_v4().to_string();
+
+            // Step 1: Store the current event data in the invocation registry
+            self.host_state
+                .active_invocations
+                .lock()
+                .unwrap()
+                .insert(invocation_id.clone(), current_event.clone());
+
+            // Step 2: Call the plugin's on-notify function
+            // The plugin will call invoke(invocation_id, modified_event) to update the data
+            let handled = plugin.instance
+                .call_on_notify(&mut plugin.store, &invocation_id, &current_event)
+                .map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
+
+            if !handled {
+                eprintln!("Warning: Plugin {} returned false for hook {:?}", plugin.name, hook);
+            }
+
+            // Step 5: Retrieve the (potentially modified) event data
+            // The plugin should have called invoke() which updated this
+            let invocations = self.host_state.active_invocations.lock().unwrap();
+            current_event = invocations
+                .get(&invocation_id)
+                .ok_or_else(|| Error::Plugin(format!("Plugin {} lost invocation data", plugin.name)))?
+                .clone();
+            drop(invocations);
+
+            // Clean up the invocation
+            self.host_state
+                .active_invocations
+                .lock()
+                .unwrap()
+                .remove(&invocation_id);
+        }
+
+        // Step 6: Return the final modified event
+        Ok(current_event)
+    }
 
 }

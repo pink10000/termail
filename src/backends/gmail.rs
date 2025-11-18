@@ -8,7 +8,8 @@ use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
 use futures::future;
-use crate::plugins::plugins::PluginManager;
+use crate::plugins::plugins::{PluginManager, PluginHook};
+use crate::backends::BackendType;
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
@@ -300,7 +301,7 @@ impl Backend for GmailBackend {
                 draft.subject = subject.unwrap_or_default();
                 draft.body = body.unwrap_or_default();
 
-                let draft = if draft.to.is_empty() || draft.subject.is_empty() || draft.body.is_empty() {
+                let mut draft = if draft.to.is_empty() || draft.subject.is_empty() || draft.body.is_empty() {
                     Self::edit_email_with_prefill(&self.editor, draft)?
                 } else {
                     draft
@@ -308,6 +309,15 @@ impl Backend for GmailBackend {
 
                 if draft.to.is_empty() {
                     return Err(Error::InvalidInput("To field cannot be empty".to_string()));
+                }
+
+                if let Some(plugin_manager) = plugin_manager {
+                    let updated_body = plugin_manager.dispatch_event(
+                        PluginHook::BeforeSend, 
+                        BackendType::Gmail, 
+                        draft.body.clone()
+                    )?;
+                    draft.body = updated_body;
                 }
 
                 let email_content = format!(
@@ -325,10 +335,6 @@ impl Backend for GmailBackend {
                     .map_err(|e| Error::Connection(format!("Failed to send email: {}", e)))?;
 
                 println!("Email sent successfully! Message ID: {:?}", result.1.id);
-
-                // if let Some(plugin_manager) = plugin_manager {
-                //     plugin_manager.dispatch_event
-                // }
 
                 Ok(CommandResult::Empty)
             }
