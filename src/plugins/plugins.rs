@@ -90,14 +90,15 @@ impl TermailHostState {
 /// This is specific to wasmtime and is used to store the plugin's state.
 struct PluginState {
     invocation_count: u32,
-    host_state: TermailHostState,
+    _host_state: TermailHostState,
 }
 
 /// Implement the `termail-host` interface trait
 impl termail_host::Host for PluginState {
-    fn invoke(&mut self, invocation_id: String, event: String) -> String {
+    fn invoke(&mut self, _invocation_id: String, _event: String) -> String {
         self.invocation_count += 1;
-        invoke(&self.host_state, invocation_id, event)
+        // invoke(&self.host_state, invocation_id, event)
+        "OK".to_string()
     }
 }
 
@@ -248,7 +249,7 @@ impl PluginManager {
         for hook in manifest.hooks {
             let mut store = Store::new(&self.engine, PluginState { 
                 invocation_count: 0, 
-                host_state: self.host_state.clone()
+                _host_state: self.host_state.clone()
             });
 
             let instance = Plugin::instantiate(&mut store, &component, &self.linker)
@@ -302,29 +303,27 @@ impl PluginManager {
 
             // Step 2: Call the plugin's on-notify function
             // The plugin will call invoke(invocation_id, modified_event) to update the data
-            let handled = plugin.instance
+            let out = plugin.instance
                 .call_on_notify(&mut plugin.store, &invocation_id, &current_event)
                 .map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
 
-            if !handled {
-                eprintln!("Warning: Plugin {} returned false for hook {:?}", plugin.name, hook);
-            }
-
-            // Step 5: Retrieve the (potentially modified) event data
-            // The plugin should have called invoke() which updated this
-            let invocations = self.host_state.active_invocations.lock().unwrap();
-            current_event = invocations
-                .get(&invocation_id)
-                .ok_or_else(|| Error::Plugin(format!("Plugin {} lost invocation data", plugin.name)))?
-                .clone();
-            drop(invocations);
+            // // Step 5: Retrieve the (potentially modified) event data
+            // // The plugin should have called invoke() which updated this
+            // let invocations = self.host_state.active_invocations.lock().unwrap();
+            // current_event = invocations
+            //     .get(&invocation_id)
+            //     .ok_or_else(|| Error::Plugin(format!("Plugin {} lost invocation data", plugin.name)))?
+            //     .clone();
+            // drop(invocations);
 
             // Clean up the invocation
-            self.host_state
-                .active_invocations
-                .lock()
-                .unwrap()
-                .remove(&invocation_id);
+            // self.host_state
+            //     .active_invocations
+            //     .lock()
+            //     .unwrap()
+            //     .remove(&invocation_id);
+
+            current_event = out;
         }
 
         // Step 6: Return the final modified event
