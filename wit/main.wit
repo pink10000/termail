@@ -1,10 +1,18 @@
 package tm:plugin-system;
 
+interface host-api {
+	// The plugin calls this function to perform an action on the host.
+	// The invocation-id must be valid and active.
+	call-host: func(invocation-id: string, request: string) -> result<string, string>;
+}
+
 world plugin {
+	import host-api;
+
 	// termail will call this function when a specific event is triggered
-	// on the host side that the plugin has registered for. This is used 
+	// on the host side that the plugin has registered for. This is used
 	// to notify the plugin that an event has occurred.
-	// 
+	//
 	// The plugin processes the event and returns the modified version.
 	export on-notify: func(invocation-id: string, event: string) -> string;
 }

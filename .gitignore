@@ -36,5 +36,11 @@ tokencache.json
 *.cwasm
 
 plugins/*/build
+
+# Python specific bindings
 plugins/*/__pycache__
-plugins/*/bindings
+plugins/*/*.pyi
+plugins/*/componentize_py_async_support
+plugins/*/wit_world
+plugins/*/poll_loop.py
+plugins/*/componentize_py_*.py
