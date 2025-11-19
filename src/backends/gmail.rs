@@ -1,5 +1,6 @@
 use super::{Backend, Error};
 use crate::config::BackendConfig;
+use crate::plugins::events::{BeforeMessageSend, Event};
 use crate::types::{CommandResult, EmailMessage, MimeType, Command, Label};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
@@ -8,8 +9,7 @@ use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
 use futures::future;
-use crate::plugins::plugins::{PluginManager, PluginHook};
-use crate::backends::BackendType;
+use crate::plugins::plugins::{PluginManager};
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
@@ -312,10 +312,8 @@ impl Backend for GmailBackend {
                 }
 
                 if let Some(plugin_manager) = plugin_manager {
-                    let updated_body = plugin_manager.dispatch_event(
-                        PluginHook::BeforeSend, 
-                        BackendType::Gmail, 
-                        draft.body.clone()
+                    let updated_body = plugin_manager.dispatch(
+                        Event::<BeforeMessageSend>::new(draft.body.clone())
                     ).await?;
                     draft.body = updated_body;
                 }

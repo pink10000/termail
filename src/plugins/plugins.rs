@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use crate::plugins::events;
 
 use crate::backends::BackendType;
 
@@ -28,25 +29,12 @@ pub struct PluginManifest {
     #[serde(default)]
     pub backends: Vec<BackendType>,
     #[serde(default)]
-    pub hooks: Vec<PluginHook>,
-}
-
-#[derive(Debug, serde::Deserialize, Clone, Eq, Hash, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginHook {
-    #[serde(rename = "before_send")]
-    BeforeSend,
-    #[serde(rename = "after_send")]
-    AfterSend,
-    #[serde(rename = "before_receive")]
-    BeforeReceive,
-    #[serde(rename = "after_receive")]
-    AfterReceive,
+    pub hooks: Vec<events::Hook>,
 }
 
 /// Plugin Manager - owns all loaded plugins
 pub struct PluginManager {
-    plugins: HashMap<PluginHook, Vec<LoadedPlugin>>,
+    plugins: HashMap<events::Hook, Vec<LoadedPlugin>>,
     engine: Engine,
     linker: Linker<PluginState>,
     host_state: TermailHostState,
@@ -298,16 +286,15 @@ impl PluginManager {
     /// Dispatch an event to the appropriate plugins
     ///
     /// Plugins are called in sequence, each receiving the output of the previous plugin.
-    pub async fn dispatch_event(
-        &mut self,
-        hook: PluginHook,
-        _backend: BackendType,
-        event: String,
-    ) -> Result<String, Error> {
-        let plugins = match self.plugins.get_mut(&hook) {
-            Some(plugins) if !plugins.is_empty() => plugins,
-            _ => return Ok(event), // No plugins for this hook
-        };
+    pub async fn dispatch<T>(&mut self, event: events::Event<T>) -> Result<String, Error> {
+        
+        let mut plugins: Vec<LoadedPlugin>;
+        for trigger in event.triggers {
+            match self.plugins.get_mut(&trigger) {
+                Some(k) => if !k.is_empty() {plugins.append(k)},
+                None => continue
+            }
+        }
 
         let mut current_event = event;
 
