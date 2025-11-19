@@ -182,7 +182,6 @@ impl PluginManager {
         };
 
         if !plugin_dir.exists() {
-            println!("No plugin directory found, skipping plugin loading");
             return Ok(0);
         }
 
@@ -211,7 +210,6 @@ impl PluginManager {
             };
 
             if enabled_plugins.contains(&manifest.name.to_lowercase()) {
-                println!("Loading plugin: {}", manifest.name);
                 self.load_plugin(&plugin_dir, manifest)?;
                 loaded_plugins_count += 1;
             } else {
@@ -253,11 +251,9 @@ impl PluginManager {
         let wasm_path = plugin_dir.join("plugin.wasm");
 
         let component = if cwasm_path.exists() {
-            println!("Loading pre-compiled plugin: {:?}", cwasm_path);
             unsafe { Component::deserialize_file(&self.engine, &cwasm_path) }
                 .map_err(|e| Error::Plugin(format!("Failed to load pre-compiled WASM: {}", e)))?
         } else if wasm_path.exists() {
-            println!("Loading plugin (JIT compilation): {:?}", wasm_path);
             Component::from_file(&self.engine, &wasm_path)
                 .map_err(|e| Error::Plugin(format!("Failed to load WASM: {}", e)))?
         } else {

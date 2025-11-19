@@ -11,8 +11,8 @@ use backends::{BackendType, Backend};
 use types::Command;
 use config::Config;
 use ui::app::App;
-
 use std::path::PathBuf;
+use std::sync::Arc;
 
 async fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
     let mut backend: Box<dyn Backend> = config.get_backend();
@@ -55,59 +55,89 @@ async fn main() {
     config.merge(&args);
     
     let mut plugin_manager = PluginManager::new().unwrap();
-    
-    match plugin_manager.load_plugins(&config.termail.plugins) {
+    let enabled_plugins = config.termail.plugins.clone();
+
+    if config.termail.cli {
+        if let Err(code) = run_cli(
+            args.command, 
+            config, 
+            &mut plugin_manager, 
+            &enabled_plugins
+        ).await {
+            std::process::exit(code);
+        }
+        return;
+    }
+
+    if let Err(code) = run_tui(
+        config, 
+        plugin_manager, 
+        enabled_plugins
+    ).await {
+        std::process::exit(code);
+    }
+}
+
+async fn run_tui(
+    config: Config,
+    plugin_manager: PluginManager,
+    enabled_plugins: Vec<String>,
+) -> Result<(), i32> {
+    let backend: Box<dyn Backend> = create_authenticated_backend(&config).await;
+    let terminal = ratatui::init();
+    let app = App::new(config, backend, plugin_manager);
+
+    let plugin_loader_manager = Arc::clone(&app.plugin_manager);
+    tokio::spawn(async move {
+        let mut manager = plugin_loader_manager.lock().await;
+        let _ = manager.load_plugins(&enabled_plugins);
+    });
+
+    let tui_result = app.run(terminal).await;
+    ratatui::restore();
+    match tui_result {
+        Ok(_) => {
+            println!("TUI exited successfully");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("TUI error: {}", e);
+            Err(1)
+        }
+    }
+}
+
+async fn run_cli(
+    command: Option<Command>,
+    config: Config,
+    plugin_manager: &mut PluginManager,
+    enabled_plugins: &[String],
+) -> Result<(), i32> {
+    let command = match command {
+        Some(cmd) => cmd,
+        None => {
+            eprintln!("Missing Subcommand for CLI mode.");
+            return Err(1);
+        }
+    };
+
+    match plugin_manager.load_plugins(enabled_plugins) {
         Ok(count) => println!("Loaded successfully: {} plugins", count),
         Err(e) => {
             eprintln!("Error loading plugins: {}", e);
-            std::process::exit(1);
+            return Err(1);
         }
-    }
-    
-    if !config.termail.cli {
-        let backend: Box<dyn Backend> = create_authenticated_backend(&config).await;
-        let terminal = ratatui::init();
-        let tui_result = App::new(
-            config, 
-            backend,
-            plugin_manager
-        ).run(terminal).await;
-        match tui_result {
-            Ok(_) => println!("TUI exited successfully"),
-            Err(e) => eprintln!("TUI error: {}", e),
-        }
-        ratatui::restore();
-        std::process::exit(0);
     }
 
-    match args.command {
-        None => {
-            eprintln!("Missing Subcommand for CLI mode.");
-            std::process::exit(1);
+    let backend = create_authenticated_backend(&config).await;
+    match backend.do_command(command, Some(plugin_manager)).await {
+        Ok(result) => {
+            println!("RESULT:\n{}", result);
+            Ok(())
         }
-        Some(_) => {}
-    }
-        
-    let mut backend: Box<dyn Backend> = config.get_backend();
-    
-    if backend.needs_oauth() {
-        if let Err(e) = backend.authenticate().await {
-            eprintln!("Authentication failed: {}", e);
-            std::process::exit(1);
-        }
-    }
-    
-    // Execute the command using the selected backend
-    // Pass Some(&mut plugin_manager) if plugins might be needed, None otherwise
-    let result = match backend.do_command(
-        args.command.unwrap(), 
-        Some(&mut plugin_manager)
-    ).await {
-        Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);
-            std::process::exit(1);
+            Err(1)
         }
-    };    
-    println!("RESULT:\n{}", result);
+    }
 }
