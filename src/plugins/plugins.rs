@@ -1,15 +1,15 @@
 use crate::error::Error;
+use crate::plugins::events::Hook;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use crate::plugins::events;
 
 use crate::backends::BackendType;
 
-mod bindings {
+pub mod bindings {
     wasmtime::component::bindgen!({
         path: "wit/main.wit",
         world: "plugin",
@@ -18,6 +18,7 @@ mod bindings {
 
 use bindings::Plugin;
 use bindings::tm::plugin_system::host_api;
+use bindings::tm::plugin_system::event_api;
 
 /// Manifest structure for plugin.toml
 #[derive(Debug, serde::Deserialize)]
@@ -29,12 +30,12 @@ pub struct PluginManifest {
     #[serde(default)]
     pub backends: Vec<BackendType>,
     #[serde(default)]
-    pub hooks: Vec<events::Hook>,
+    pub hooks: Vec<Hook>,
 }
 
 /// Plugin Manager - owns all loaded plugins
 pub struct PluginManager {
-    plugins: HashMap<events::Hook, Vec<LoadedPlugin>>,
+    plugins: HashMap<Hook, Vec<LoadedPlugin>>,
     engine: Engine,
     linker: Linker<PluginState>,
     host_state: TermailHostState,
@@ -65,10 +66,11 @@ pub struct LoadedPlugin {
 /// Global Host State shared across all plugins
 #[derive(Clone)]
 pub struct TermailHostState {
-    pub active_invocations: Arc<Mutex<HashMap<String, String>>>,
-    // invocation_id -> event
-    // we probably do not need to wrap this in an `Arc` and `Mutex`
-    // since it is only used within the same thread.
+    /// Maps invocation_id to the WIT event that's currently being processed
+    /// This allows plugins to query the host about the current event context
+    /// We probably do not need to wrap this in an `Arc` and `Mutex`
+    /// since it is only used within the same thread.
+    pub active_invocations: Arc<Mutex<HashMap<String, event_api::Event>>>,
 }
 
 impl TermailHostState {
@@ -265,8 +267,10 @@ impl PluginManager {
                 },
             );
 
+            // TODO: A maintainable/readable error message that tells users potential fixes. For example, 
+            // sometimes the user may have forgotten to recompile the plugin (this has happened to me).
             let instance = Plugin::instantiate(&mut store, &component, &self.linker)
-                .map_err(|e| Error::Plugin(format!("Failed to instantiate: {}", e)))?;
+                .map_err(|e| Error::Plugin(format!("Failed to instantiate plugin \"{}\" with error: {}", manifest.name, e)))?;
 
             let loaded_plugin = LoadedPlugin {
                 name: manifest.name.clone(),
@@ -286,19 +290,23 @@ impl PluginManager {
     /// Dispatch an event to the appropriate plugins
     ///
     /// Plugins are called in sequence, each receiving the output of the previous plugin.
-    pub async fn dispatch<T>(&mut self, event: events::Event<T>) -> Result<String, Error> {
+    /// Returns the final content string after all plugins have processed the event.
+    pub async fn dispatch(&mut self, event: event_api::Event) -> Result<String, Error> {
+        // Get the hook for this event to find which plugins to call
+        let hook = event.hook();
         
-        let mut plugins: Vec<LoadedPlugin>;
-        for trigger in event.triggers {
-            match self.plugins.get_mut(&trigger) {
-                Some(k) => if !k.is_empty() {plugins.append(k)},
-                None => continue
+        // Get the plugins registered for this hook
+        let plugins = match self.plugins.get_mut(&hook) {
+            Some(plugins) if !plugins.is_empty() => plugins,
+            _ => {
+                // No plugins registered for this hook, return the content as-is
+                return Ok(event.content().to_string());
             }
-        }
+        };
 
         let mut current_event = event;
 
-        for plugin in plugins {
+        for plugin in plugins.iter_mut() {
             let invocation_id = uuid::Uuid::new_v4().to_string();
 
             self.host_state
@@ -316,9 +324,17 @@ impl PluginManager {
             })
             .map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
 
+            // Remove from active_invocations after processing
+            self.host_state
+                .active_invocations
+                .lock()
+                .unwrap()
+                .remove(&invocation_id);
+
             println!("[Host] Plugin {} processed event", plugin.name);
         }
 
-        Ok(current_event)
+        // Return the final content string
+        Ok(current_event.content().to_string())
     }
 }

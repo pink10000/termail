@@ -1,3 +1,14 @@
+use crate::plugins::plugins::bindings;
+use bindings::tm::plugin_system::event_api;
+
+// Re-export the WIT event type for convenience
+pub use event_api::Event as WitEvent;
+
+/// The `Hook` enum represents the different events that can be triggered by the plugin.
+/// It is what `serde` deserializes from the `hooks` field in the plugin manifest.
+/// 
+/// This is different from the `main.wit` file's `event` variant, which is what the plugin 
+/// will receive when it is called by termail. 
 #[derive(Debug, serde::Deserialize, Clone, Eq, Hash, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Hook {
@@ -11,34 +22,71 @@ pub enum Hook {
     AfterReceive,
 }
 
-#[derive(Clone)]
-pub struct Event<T> {
-    pub data: T,
-    pub triggers: &'static [Hook],
+/// Convert from `event_api::Event` (WIT type) to `Hook` (manifest/config type)
+impl From<event_api::Event> for Hook {
+    fn from(event: event_api::Event) -> Self {
+        match event {
+            event_api::Event::BeforeSend(_) => Hook::BeforeSend,
+            event_api::Event::AfterSend(_) => Hook::AfterSend,
+            event_api::Event::BeforeReceive(_) => Hook::BeforeReceive,
+            event_api::Event::AfterReceive(_) => Hook::AfterReceive,
+        }
+    }   
 }
 
-pub struct BeforeMessageSend {
-    pub content: String
-}
-
-pub struct AfterMessageSend {
-    pub content: String
-}
-
-impl Event<BeforeMessageSend> {
-    pub fn new(content: String) -> Self {
-        Event {
-            data: BeforeMessageSend { content },
-            triggers: &[Hook::BeforeSend],
+/// Convert from `Hook` (manifest/config type) to `event_api::Event` (WIT type)
+/// Note: This requires content, so we provide helper functions instead
+impl Hook {
+    /// Get the corresponding WIT event variant for a given hook and content
+    pub fn to_wit_event(&self, content: String) -> event_api::Event {
+        match self {
+            Hook::BeforeSend => event_api::Event::BeforeSend(content),
+            Hook::AfterSend => event_api::Event::AfterSend(content),
+            Hook::BeforeReceive => event_api::Event::BeforeReceive(content),
+            Hook::AfterReceive => event_api::Event::AfterReceive(content),
         }
     }
 }
 
-impl Event<AfterMessageSend> {
-    pub fn new(content: String) -> Self {
-        Event {
-            data: AfterMessageSend { content },
-            triggers: &[Hook::AfterSend],
+/// Helper functions to create WIT events from content
+impl event_api::Event {
+    /// Create a BeforeSend event with the given content
+    pub fn before_send(content: String) -> Self {
+        event_api::Event::BeforeSend(content)
+    }
+
+    /// Create an AfterSend event with the given content
+    pub fn after_send(content: String) -> Self {
+        event_api::Event::AfterSend(content)
+    }
+
+    /// Create a BeforeReceive event with the given content
+    pub fn before_receive(content: String) -> Self {
+        event_api::Event::BeforeReceive(content)
+    }
+
+    /// Create an AfterReceive event with the given content
+    pub fn after_receive(content: String) -> Self {
+        event_api::Event::AfterReceive(content)
+    }
+
+    /// Extract the content string from any event variant
+    pub fn content(&self) -> &str {
+        match self {
+            event_api::Event::BeforeSend(content) => content,
+            event_api::Event::AfterSend(content) => content,
+            event_api::Event::BeforeReceive(content) => content,
+            event_api::Event::AfterReceive(content) => content,
+        }
+    }
+
+    /// Get the Hook variant that corresponds to this event
+    pub fn hook(&self) -> Hook {
+        match self {
+            event_api::Event::BeforeSend(_) => Hook::BeforeSend,
+            event_api::Event::AfterSend(_) => Hook::AfterSend,
+            event_api::Event::BeforeReceive(_) => Hook::BeforeReceive,
+            event_api::Event::AfterReceive(_) => Hook::AfterReceive,
         }
     }
 }

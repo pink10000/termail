@@ -1,6 +1,6 @@
 use super::{Backend, Error};
 use crate::config::BackendConfig;
-use crate::plugins::events::{BeforeMessageSend, Event};
+use crate::plugins::events::Hook;
 use crate::types::{CommandResult, EmailMessage, MimeType, Command, Label};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
@@ -311,9 +311,10 @@ impl Backend for GmailBackend {
                     return Err(Error::InvalidInput("To field cannot be empty".to_string()));
                 }
 
+                // Plugin hook-point: Hook::BeforeSend
                 if let Some(plugin_manager) = plugin_manager {
                     let updated_body = plugin_manager.dispatch(
-                        Event::<BeforeMessageSend>::new(draft.body.clone())
+                        Hook::BeforeSend.to_wit_event(draft.body.clone())
                     ).await?;
                     draft.body = updated_body;
                 }

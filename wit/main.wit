@@ -1,5 +1,18 @@
 package tm:plugin-system;
 
+interface event-api {
+	// The event that is triggered by termail.
+	// This is used as the single source of truth for the event. 
+	// If you plan to extend the event system, you must also
+	// extend the src/plugins/events.rs Hook enum and add the new event
+	// to the variant.
+	variant event {
+		before-send(string),
+		after-send(string),
+		before-receive(string),
+		after-receive(string),
+	}
+}
 interface host-api {
 	// The plugin calls this function to perform an action on the host.
 	// The invocation-id must be valid and active.
@@ -8,11 +21,12 @@ interface host-api {
 
 world plugin {
 	import host-api;
+	use event-api.{event};
 
 	// termail will call this function when a specific event is triggered
 	// on the host side that the plugin has registered for. This is used
 	// to notify the plugin that an event has occurred.
 	//
 	// The plugin processes the event and returns the modified version.
-	export on-notify: func(invocation-id: string, event: string) -> string;
+	export on-notify: func(invocation-id: string, event: event) -> event;
 }
