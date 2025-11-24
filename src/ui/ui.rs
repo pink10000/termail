@@ -46,7 +46,6 @@ fn create_label_item(label: &Label) -> ListItem<'static> {
 struct AppLayouts {
     top_bar: Rect,
     bottom_bar: Rect,
-    middle_section: Rect,
     folder_pane: Rect,
     email_pane: Rect,
     message_pane: Rect,
@@ -126,7 +125,6 @@ impl App {
         AppLayouts {
             top_bar,
             bottom_bar,
-            middle_section: middle_section_container,
             folder_pane,
             border1,
             email_pane: content_split[0],
@@ -239,7 +237,7 @@ impl App {
                     let from = &email.from;
                     let subject = &email.subject;
                     let line = Line::from(vec![
-                        Span::styled(format!("{:.20}", from), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{:<20.20}", from), Style::default().fg(Color::Cyan)),
                         Span::raw(" "),
                         Span::styled(subject, Style::default().fg(Color::White)),
                     ]);
@@ -301,7 +299,7 @@ impl App {
                         // Include both header and body
                         format!(
                             "{}\n\n{}",
-                            self.format_email_header(&email.from, &email.to, &email.date, &email.subject),
+                            self.format_email_header(&email.from.to_string(), &email.to, &email.date, &email.subject),
                             email.body
                         )
                     } else {
@@ -336,7 +334,6 @@ impl Widget for &App {
         // Render all components
         self.render_top_bar(layouts.top_bar, buf);
         self.render_bottom_bar(layouts.bottom_bar, buf);
-        ratatui::widgets::Clear.render(layouts.middle_section, buf);
         self.render_folder_pane(layouts.folder_pane, buf);
         self.render_email_list_pane(layouts.email_pane, buf);
         self.render_message_pane(layouts.message_pane, buf);

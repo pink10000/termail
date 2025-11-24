@@ -3,7 +3,7 @@ extern crate imap;
 use super::{Backend, Error};
 use crate::auth::Credentials;
 use crate::config::BackendConfig;
-use crate::types::{Command, CommandResult, EmailMessage, Label};
+use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label};
 use async_trait::async_trait;
 use lettre::{Transport, Message, SmtpTransport};
 use tempfile::NamedTempFile;
@@ -102,7 +102,7 @@ impl GreenmailBackend {
             match name {
                 "Subject" => output.subject = value.to_string(),
                 "To" => output.to = value.to_string(),
-                "From" => output.from = value.to_string(),
+                "From" => output.from = EmailSender::from(value.to_string()),
                 "Received" => {
                     output.date = value.split_once(";").unwrap().1.trim().to_string();
                 },

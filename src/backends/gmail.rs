@@ -1,7 +1,7 @@
 use super::{Backend, Error};
 use crate::config::BackendConfig;
 use crate::plugins::events::Hook;
-use crate::types::{CommandResult, EmailMessage, MimeType, Command, Label};
+use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label, MimeType};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use tempfile::NamedTempFile;
@@ -124,7 +124,7 @@ impl GmailBackend {
                     emails.push(EmailMessage { 
                         id: message_id, 
                         subject: get_header("Subject"),
-                        from: get_header("From"),
+                        from: EmailSender::from(get_header("From")),
                         to: get_header("To"),
                         date: get_header("Date"),
                         body,

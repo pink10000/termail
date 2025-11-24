@@ -32,7 +32,7 @@ pub enum Command {
 }
 
 /// Result type for backend commands - can represent different types of outputs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum CommandResult {
     /// A single email message
     Email(EmailMessage),
@@ -79,11 +79,54 @@ pub enum MimeType {
     TextHtml,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EmailSender {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: String,
+}
+
+// This allows you to do: EmailSender::from("Bob <bob@gmail.com>".to_string())
+impl From<String> for EmailSender {
+    fn from(value: String) -> Self {
+        if let (Some(left), Some(right)) = (value.find("<"), value.rfind(">")) {
+            if left < right {
+                let name_field = value[..left].trim().to_string();
+                let email_field = value[left + 1..right].to_string();
+
+                return EmailSender {
+                    name: if name_field.is_empty() { None } else { Some(name_field) },
+                    email: email_field
+                }
+            }
+        }
+
+        // Fallback
+        EmailSender { name: None, email: value }
+    }
+}
+
+impl std::fmt::Display for EmailSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let content = match &self.name {
+            Some(name) => name.clone(),
+            None => self.email.clone()
+        };
+        let displayed_text = if let Some(p) = f.precision() {
+             format!("{:.1$}", content, p) 
+        } else {
+             content
+        };
+        f.pad(&displayed_text)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailMessage {
     pub id: String,
     pub subject: String,
-    pub from: String,
+    pub from: EmailSender,
     pub to: String,
     pub date: String,
     pub body: String,
@@ -95,7 +138,7 @@ impl EmailMessage {
         Self {
             id: String::new(),
             subject: String::new(),
-            from: String::new(),
+            from: EmailSender::default(),
             to: String::new(),
             date: String::new(),
             body: String::new(),
