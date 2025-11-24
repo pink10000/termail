@@ -29,6 +29,10 @@ impl GmailBackend {
         }
     }
 
+    /// Fetches the inbox emails from the Gmail backend.
+    /// 
+    /// There is a chance that you will be rate limited by Gmail if you fetch too 
+    /// many emails at once. 
     async fn fetch_inbox_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
         let result = self.hub.as_ref().unwrap()
             .users()
@@ -65,6 +69,9 @@ impl GmailBackend {
             .collect::<Vec<_>>();
 
         let message_results = future::join_all(futures).await;
+        if message_results.iter().any(|result| result.is_err()) {
+            return Err(Error::Connection("Rate limited by Gmail".to_string()));
+        }
         
         // We might be able to use an array here instead of a vector here in the future.
         let mut emails = Vec::new();

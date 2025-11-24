@@ -173,12 +173,12 @@ impl App {
     /// Handles the tick event of the terminal.
     /// 
     /// Anything that requires a fixed framerate will be put here.
-    /// Also handles periodic email refresh (every 60 seconds).
+    /// Also handles periodic email refresh (every 120 seconds).
     pub fn tick(&mut self) {
         self.tick_counter += 1;
         
-        // Refresh emails every 60 seconds (30 FPS * 60 seconds = 1800 ticks)
-        const REFRESH_INTERVAL: u64 = 1800;
+        // Refresh emails every 120 seconds (30 FPS * 120 seconds = 3600 ticks)
+        const REFRESH_INTERVAL: u64 = 3600;
         
         if self.tick_counter % REFRESH_INTERVAL == 0 {
             Self::spawn_email_fetch(

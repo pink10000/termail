@@ -46,6 +46,7 @@ fn create_label_item(label: &Label) -> ListItem<'static> {
 struct AppLayouts {
     top_bar: Rect,
     bottom_bar: Rect,
+    middle_section: Rect,
     folder_pane: Rect,
     email_pane: Rect,
     message_pane: Rect,
@@ -92,32 +93,45 @@ impl App {
             .split(area);
         
         let top_bar = main_layout[0];
-        let middle_section = main_layout[1];
+        let middle_section_container = main_layout[1];
         let bottom_bar = main_layout[2];
 
         // Determine folder pane width (default to 20 if labels not loaded)
         let folder_pane_width = self.calculate_folder_pane_width().unwrap_or(20);
 
         // Middle section: folder | border | emails | border | message
-        let middle_section_layout = Layout::default()
+        let horizontal_split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(vec![
                 Constraint::Length(folder_pane_width),  // Fixed width based on content
                 Constraint::Length(1),  // Border
-                Constraint::Percentage((100 - folder_pane_width) / 2),
-                Constraint::Length(1),  // Border
-                Constraint::Percentage((100 - folder_pane_width) / 2),
+                Constraint::Min(0),
             ])
-            .split(middle_section);
+            .split(middle_section_container);
         
+        let folder_pane = horizontal_split[0];
+        let border1 = horizontal_split[1];
+        let content_area = horizontal_split[2];
+
+        // CONTENT: Split Email List vs Message Pane
+        let content_split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![
+                Constraint::Percentage(50), 
+                Constraint::Length(1),
+                Constraint::Percentage(50), 
+            ])
+            .split(content_area);
+
         AppLayouts {
             top_bar,
             bottom_bar,
-            folder_pane: middle_section_layout[0],
-            border1: middle_section_layout[1],
-            email_pane: middle_section_layout[2],
-            border2: middle_section_layout[3],
-            message_pane: middle_section_layout[4],
+            middle_section: middle_section_container,
+            folder_pane,
+            border1,
+            email_pane: content_split[0],
+            border2: content_split[1],
+            message_pane: content_split[2],
         }
     }
 
@@ -225,7 +239,7 @@ impl App {
                     let from = &email.from;
                     let subject = &email.subject;
                     let line = Line::from(vec![
-                        Span::styled(format!("{:<20}", from), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{:.20}", from), Style::default().fg(Color::Cyan)),
                         Span::raw(" "),
                         Span::styled(subject, Style::default().fg(Color::White)),
                     ]);
@@ -252,31 +266,42 @@ impl App {
         ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
     }
 
+    /// This function formats the email header for display in the message pane by 
+    /// aligning the fields to the left along the `:` character.
+    fn format_email_header(&self, from: &str, to: &str, date: &str, subject: &str) -> String {
+        // The longest label is "Subject" (7 chars). We use 8 for PAD to include one space 
+        // between the label and the colon.
+        const PAD: usize = 8; 
+        format!(
+            "{:>PAD$}: {}\n{:>PAD$}: {}\n{:>PAD$}: {}\n{:>PAD$}: {}",
+            "From", from, "To", to, "Date", date, "Subject", subject,
+        )
+    }
+
     fn render_message_pane(&self, area: Rect, buf: &mut Buffer) {
-        let is_active = matches!(self.state, ActiveViewState::MessageView);
-        
+        ratatui::widgets::Clear.render(area, buf);
         let block = Block::default()
-            .title("Message")
-            .title_style(if is_active {
+            .title("Messages")
+            .title_style(if matches!(self.state, ActiveViewState::MessageView) {
                 Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
-            });
-        
+            })
+            .style(Style::default().bg(Color::Reset));
+        block.render(area, buf);
+
         let content = match &self.emails {
-            None => "Loading...".to_string(),
+            None => "Loading messages...".to_string(),
             Some(emails) if emails.is_empty() => "No message selected".to_string(),
             Some(emails) => {
                 // Show the selected email based on selected_email_index
                 if let Some(index) = self.selected_email_index {
                     if index < emails.len() {
                         let email = &emails[index];
+                        // Include both header and body
                         format!(
-                            "From: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
-                            email.from,
-                            email.to,
-                            email.date,
-                            email.subject,
+                            "{}\n\n{}",
+                            self.format_email_header(&email.from, &email.to, &email.date, &email.subject),
                             email.body
                         )
                     } else {
@@ -287,10 +312,13 @@ impl App {
                 }
             }
         };
-        
+        // need to reset the message pane since the next email may have a different length
+        // and may leave artifacts 
+        // ratatui::widgets::Clear.render(area, buf);
+
         let paragraph = Paragraph::new(content)
-            .block(block)
-            .fg(Color::White);
+            .fg(Color::White)
+            .wrap(ratatui::widgets::Wrap { trim: false }); // Needs to be set false to ensure `format_email_header` works correctly.
         
         paragraph.render(area, buf);
     }
@@ -308,6 +336,7 @@ impl Widget for &App {
         // Render all components
         self.render_top_bar(layouts.top_bar, buf);
         self.render_bottom_bar(layouts.bottom_bar, buf);
+        ratatui::widgets::Clear.render(layouts.middle_section, buf);
         self.render_folder_pane(layouts.folder_pane, buf);
         self.render_email_list_pane(layouts.email_pane, buf);
         self.render_message_pane(layouts.message_pane, buf);
