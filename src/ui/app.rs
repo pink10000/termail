@@ -14,11 +14,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
+pub enum BaseViewState {
+    Labels,
+    Inbox,
+}
+
+#[derive(Clone, Debug, Copy)]
 pub enum ActiveViewState {
-    FolderView,
-    InboxView,
+    /// This state holds the base view of the application, which is the sidebar 
+    /// with labels, and the inbox view. 
+    BaseView(BaseViewState),
+    /// This state indicates that the user is viewing a single email message.
     MessageView,
+    /// This state indicates that the user is writing a new email message.
+    WriteMessageView,
 }
 
 pub struct App {
@@ -68,7 +78,7 @@ impl App {
         );
 
         Self { 
-            state: ActiveViewState::FolderView, 
+            state: ActiveViewState::BaseView(BaseViewState::Labels), 
             running: true,
             events,
             config,
@@ -104,7 +114,7 @@ impl App {
                         self.labels = Some(labels);
                     },
                     AppEvent::CycleViewState => {
-                        self.cycle_view_state();
+                        self.swap_base_view_state();
                     }
                     _ => {}
                 }
@@ -113,20 +123,59 @@ impl App {
         Ok(())
     }
     
+    /// Handles key events for the application.
+    /// 
+    /// First, `handle_key_events()` checks the current view state, and delegates to 
+    /// the appropriate handler for the current view state. 
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+        match self.state {
+            ActiveViewState::BaseView(b) => self.handle_key_base_view(key_event, b)?,
+            ActiveViewState::MessageView => self.handle_key_message_view(key_event)?,
+            ActiveViewState::WriteMessageView => self.handle_key_write_view(key_event)?,
+        }
+        Ok(())
+    }
+
+    /// Cycles through BaseViewStates: Labels -> Inbox -> Labels
+    /// State is preserved when cycling (e.g., selected email index is maintained)
+    fn handle_key_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {        
         match key_event.code {
             KeyCode::Esc => self.events.send(AppEvent::Quit),
-            KeyCode::Tab => self.events.send(AppEvent::CycleViewState),
+            KeyCode::Tab => self.state = match b {
+                BaseViewState::Labels => ActiveViewState::BaseView(BaseViewState::Inbox),
+                BaseViewState::Inbox => ActiveViewState::BaseView(BaseViewState::Labels),
+            },
+            // TODO: Handle scrolling through the labels.
             KeyCode::Down => {
-                if matches!(self.state, ActiveViewState::InboxView) {
+                if matches!(b, BaseViewState::Inbox) {
                     self.select_next_email();
                 }
             }
             KeyCode::Up => {
-                if matches!(self.state, ActiveViewState::InboxView) {
+                if matches!(b, BaseViewState::Inbox) {
                     self.select_previous_email();
                 }
             }
+            _ => {}
+        }
+        Ok(())
+    }
+
+
+    /// Handles key events for the message view.
+    /// 
+    /// TODO: Handle scrolling through the message.
+    fn handle_key_message_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+        match key_event.code {
+            KeyCode::Esc => self.return_to_base_view(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_key_write_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+        match key_event.code {
+            KeyCode::Esc => self.return_to_base_view(),
             _ => {}
         }
         Ok(())
@@ -136,14 +185,12 @@ impl App {
         self.running = false;
     }
 
-    /// Cycles through view states: FolderView -> InboxView -> MessageView -> FolderView
-    /// State is preserved when cycling (e.g., selected email index is maintained)
-    pub fn cycle_view_state(&mut self) {
-        self.state = match self.state {
-            ActiveViewState::FolderView => ActiveViewState::InboxView,
-            ActiveViewState::InboxView => ActiveViewState::MessageView,
-            ActiveViewState::MessageView => ActiveViewState::FolderView,
-        };
+    pub fn swap_base_view_state(&mut self) {
+        todo!();
+    }
+
+    fn return_to_base_view(&mut self) {
+        self.events.send(AppEvent::ChangeViewState(ActiveViewState::BaseView(BaseViewState::Inbox)));
     }
 
     /// Selects the next email in the list

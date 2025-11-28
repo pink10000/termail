@@ -6,7 +6,7 @@ use ratatui::{
     text::{Line, Span}
 };
 
-use crate::ui::app::{App, ActiveViewState};
+use crate::ui::app::{App, ActiveViewState, BaseViewState};
 use crate::types::Label;
 
 /// Helper function to create a ListItem from a Label
@@ -174,7 +174,7 @@ impl App {
     }
     
     fn render_folder_pane(&self, area: Rect, buf: &mut Buffer) {
-        let is_active = matches!(self.state, ActiveViewState::FolderView);
+        let is_active = matches!(self.state, ActiveViewState::BaseView(BaseViewState::Labels));
         
         let block = Block::default()
             .title("Folders")
@@ -213,7 +213,7 @@ impl App {
     }
 
     fn render_email_list_pane(&self, area: Rect, buf: &mut Buffer) {
-        let is_active = matches!(self.state, ActiveViewState::InboxView);
+        let is_active = matches!(self.state, ActiveViewState::BaseView(BaseViewState::Inbox));
         
         let block = Block::default()
             .title("Emails")
