@@ -4,13 +4,14 @@ cli = false
 default_backend = "greenmail"
 email_fetch_count = 20
 editor = "vim"   # "vim" or "code" for VSCode
-plugins = ["rocketship", "signature-rs"] # plugins are not case-sensitive
+plugins = [] # plugins are not case-sensitive
 
 [backends.greenmail]
 auth_credentials = { username = "user1@example.com", password = "password123"}
 host = "127.0.0.1"
 port = 1993
 ssl = true
+maildir_path = "../Maildir/Greenmail"
 
 [backends.gmail]
 host = "imap.gmail.com"
@@ -18,3 +19,4 @@ port = 993
 ssl = true
 oauth2_client_secret_file = "./client_secret.json"
 filter_labels = ["CATEGORY_FORUMS", "CATEGORY_UPDATES", "CATEGORY_PERSONAL", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "UNREAD", "YELLOW_STAR", "CHAT"]
+maildir_path = "../Maildir/Gmail"

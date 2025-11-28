@@ -31,6 +31,7 @@ pub struct BackendConfig {
     // The labels to filter out from the list of labels
     // The labels are case-sensitive.
     pub filter_labels: Option<Vec<String>>,
+    pub maildir_path: String
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -27,7 +27,7 @@ pub enum Command {
         body: Option<String>,
     },
 
-    // SyncFromCloud,
+    SyncFromCloud,
 
     /// Null command (used for testing plugins))
     Null

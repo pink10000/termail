@@ -5,6 +5,7 @@ pub mod auth;
 pub mod types;
 pub mod ui;
 pub mod plugins;
+pub mod maildir;
 use plugins::plugins::PluginManager;
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};

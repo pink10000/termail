@@ -245,6 +245,12 @@ impl Backend for GreenmailBackend {
 
                 self.send_email(&draft)
             }
+            Command::SyncFromCloud => {
+
+                println!("sync from lcoud called");
+
+                Ok(CommandResult::Empty)
+            }
             Command::Null => Ok(CommandResult::Empty)
         }
     }

@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
 use futures::future;
 use crate::plugins::plugins::{PluginManager};
+use crate::maildir::MaildirManager;
 
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
@@ -17,6 +18,7 @@ pub struct GmailBackend {
     hub: Option<Box<GmailHub>>,
     filter_labels: Option<Vec<String>>,
     editor: String,
+    maildir_manager: Option<MaildirManager>,
 }
 
 impl GmailBackend {
@@ -26,6 +28,7 @@ impl GmailBackend {
             hub: None,
             filter_labels: config.filter_labels.clone(),
             editor,
+            maildir_manager: Some(MaildirManager::new(config.maildir_path.clone()).unwrap()),
         }
     }
 
@@ -341,6 +344,89 @@ impl Backend for GmailBackend {
                     .map_err(|e| Error::Connection(format!("Failed to send email: {}", e)))?;
 
                 println!("Email sent successfully! Message ID: {:?}", result.1.id);
+
+                Ok(CommandResult::Empty)
+            }
+            Command::SyncFromCloud => {
+
+                println!("Sync From Cloud Gmail called");
+                
+                // let profile_result = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .get_profile("me")
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to get profile: {}", e)))?;
+                
+                // let current_history_id = profile_result.1.history_id
+                //     .ok_or_else(|| Error::Connection("No historyId in profile".to_string()))?;
+                
+                // println!("Current history ID: {:?}", current_history_id);
+                
+                // let result = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .history_list("me")
+                //     .start_history_id(2902946)
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
+
+                // println!("history list result: {:?}", result.1);
+
+                let result = self.hub.as_ref().unwrap()
+                    .users()
+                    .messages_list("me")
+                    .max_results(1)
+                    // .page_token("03683800523264572113")
+                    .doit()
+                    .await
+                    .map_err(|e| Error::Connection(format!("Failed to fetch inbox: {}", e)))?;
+                
+                let messages: Vec<Message> = result.1.messages.unwrap_or_default();
+                println!("emails: {:?}", messages);
+                println!("messages count: {:?}", messages.len());
+
+                let next_page_token = result.1.next_page_token;
+                println!("next page token: {:?}", next_page_token);
+
+                let message_id = messages.first().unwrap().id.clone().unwrap();
+
+                let message_response = self.hub.as_ref().unwrap()
+                    .users()
+                    .messages_get("me", message_id.as_str())
+                    .format("raw")
+                    .doit()
+                    .await
+                    .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
+                        
+                let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
+                println!("message: {:?}", message);
+
+
+                self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
+
+
+                // let res = self.maildir_manager.as_ref().unwrap().save_message(messages.first().unwrap().clone(), "cur".to_string());
+                // if res.is_err() {
+                //     return Err(Error::Connection(format!("Failed to save message: {}", res.err().unwrap())));
+                // } else {
+                //     println!("Message saved successfully");
+                // }
+
+                // let message_id = <std::option::Option<std::string::String> as Clone>::clone(&messages.first().unwrap().id).unwrap();
+                // println!("emails: {:?}", messages);
+
+                // let message_response = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .messages_get("me", message_id.as_str())
+                //     .format("minimal")
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
+                        
+                // let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
+                // println!("message: {:?}", message);
+
 
                 Ok(CommandResult::Empty)
             }
