@@ -20,6 +20,11 @@ and test fetching the top email using
 cargo run -- --cli --backend Greenmail fetch-inbox
 ```
 
+Can sync from cloud using:
+```bash
+cargo run -- --cli --backend Gmail sync-from-cloud
+```
+
 # acknowledgement
 
 as part of UCSD's CSE 291Y
