@@ -4,7 +4,7 @@ use crate::plugins::events::Hook;
 use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label, MimeType};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile};
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
@@ -233,6 +233,87 @@ impl GmailBackend {
         draft.body = body_lines.join("\n");
         Ok(draft)
     }
+
+
+    async fn full_sync(&self) -> Result<(), Error> {
+        println!("FULL SYNC HAPPENING");
+        
+        // let emails: Vec<Message> = Vec::new();
+        let mut page_token: Option<String> = None;
+
+        let mut num_emails = 0;
+
+        loop {
+            let mut request = self.hub.as_ref().unwrap()
+                .users()
+                .messages_list("me")
+                .max_results(500);
+            
+            if let Some(token) = page_token {
+                request = request.page_token(&token);
+            }
+            
+            let result = request.doit().await.map_err(|e| Error::Connection(format!("Failed to fetch messages: {}", e)))?;
+            
+            page_token = result.1.next_page_token;
+            println!("next page token: {:?}", page_token);
+            
+            let messages: Vec<Message> = result.1.messages.unwrap_or_default();
+
+            for message in messages {
+
+                let message_response = self.hub.as_ref().unwrap()
+                    .users()
+                    .messages_get("me", message.id.unwrap().as_str())
+                    .format("raw")
+                    .doit()
+                    .await
+                    .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
+
+                match message_response {
+                    Ok(message) => {
+
+                        // Save message to correct maildir subdirectory
+                        // message will either have label READ or UNREAD
+                        if message.1.label_ids.clone().unwrap_or_default().contains(&"READ".to_string()) {
+                            self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
+                        } else {
+                            self.maildir_manager.as_ref().unwrap().save_message(message.1, "new".to_string()).unwrap();
+                        } 
+                        
+                        // TODO update sync_state.json with new last_sync_id and mapping from gmail message id to maildir message id
+                        // this will be useful for incremental and smart sync
+                        println!("Number of emails saved: {:?}", num_emails);
+                        num_emails += 1;
+
+                    }
+                    Err(e) => {
+                        return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
+                    }
+                }
+
+            }
+
+            if page_token.is_none() {
+                break;
+            }
+        }
+
+        println!("Total emails fetched: {:?}", num_emails);
+
+        Ok(())
+    }
+
+
+    async fn incremental_sync(&self) -> Result<(), Error> {
+        println!("INCREMENTAL SYNC HAPPENING");
+        Ok(())
+    }
+
+    async fn smart_sync(&self) -> Result<(), Error> {
+        println!("SMART SYNC HAPPENING");
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -355,8 +436,7 @@ impl Backend for GmailBackend {
                 println!("last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 {
-                    println!("FULL SYNC HAPPENING");
-                    // full_sync()
+                    self.full_sync().await?;
                     
                 } else {
                     
@@ -370,8 +450,7 @@ impl Backend for GmailBackend {
                     match result {
                         Ok(result) => {
                             println!("history list result: {:?}", result.1);
-                            println!("INCREMENTAL SYNC HAPPENING");
-                            // incremental_sync()
+                            self.incremental_sync().await?;
                         }
                         Err(e) => {
                             if e.to_string().contains("404") {
@@ -388,7 +467,7 @@ impl Backend for GmailBackend {
                                 // if gmail deleted the email from cloud, then delete the email from maildir
                                 // if there are emails in maildir that are not in the cloud then delete email from maildir
 
-                                println!("SMART SYNC HAPPENING");
+                                self.smart_sync().await?;
                             } else {
                                 return Err(Error::Connection(format!("Failed to fetch history: {}", e)));
                             }
