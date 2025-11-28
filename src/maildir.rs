@@ -1,12 +1,16 @@
 use google_gmail1::api::Message;
 use crate::error::Error;
 use maildir::Maildir;
+use std::path::Path;
+use std::collections::HashMap;
 
 pub struct MaildirManager {
     maildir: Maildir,
+    last_sync_id: u64,
 }
 
 impl MaildirManager {
+    // create maildir manager
     pub fn new(maildir_path: String) -> Result<Self, Error> {
         
         let maildir = Maildir::from(maildir_path);
@@ -15,51 +19,51 @@ impl MaildirManager {
         maildir.create_dirs()
             .map_err(|e| Error::Other(format!("Failed to create maildir directories: {}", e)))?;
 
-        Ok(Self { maildir })
+        let last_sync_id = Self::create_or_read_sync_state_file(maildir.path()).map_err(|e| Error::Other(format!("Failed to create sync_state.json file: {}", e)))?;
+        
+        Ok(Self { 
+            maildir,
+            last_sync_id: last_sync_id,
+        })
     }
 
-    pub fn save_message(&self, message: Message, maildir_subdir: String) -> Result<(), Error> {
-   
+    fn create_or_read_sync_state_file(maildir_path: &Path) -> Result<u64, Error> {
+        let sync_state_file = maildir_path.join("sync_state.json");
+        if !sync_state_file.exists() {
+            // sync state file does not exist, create it with default values
+            let content = "{\"last_sync_id\": 0}";
+            std::fs::write(sync_state_file, content).map_err(
+                |e| Error::Other(format!("Failed to create sync_state.json file: {}", e)))?;
+            return Ok(0);
 
-        if maildir_subdir == "cur" {
-            self.maildir.store_cur_with_flags(&message.raw.unwrap_or_default(), "").map_err(|e| Error::Other(format!("Failed to store message: {}", e)))?;
-        } else if maildir_subdir == "new" {
-            self.maildir.store_new(&message.raw.unwrap_or_default()).map_err(|e| Error::Other(format!("Failed to store message: {}", e)))?;
         } else {
-            return Err(Error::Other("Invalid maildir subdirectory".to_string()));
+            // sync state file exists, read it
+            let content = std::fs::read_to_string(sync_state_file).map_err(
+                |e| Error::Other(format!("Failed to read sync_state.json file: {}", e)))?;
+            let sync_state: HashMap<String, u64> = serde_json::from_str(&content).map_err(
+                |e| Error::Other(format!("Failed to parse sync_state.json file: {}", e)))?;
+            return Ok(sync_state["last_sync_id"]);
+        }
+    }
+
+
+    pub fn get_last_sync_id(&self) -> u64 {
+        self.last_sync_id
+    }
+
+
+    // save message to maildir
+    pub fn save_message(&self, message: Message, maildir_subdir: String) -> Result<(), Error> {
+        if maildir_subdir == "cur" {
+            self.maildir.store_cur_with_flags(&message.raw.unwrap(), "").map_err(
+                |e| Error::Other(format!("Failed to store message in cur: {}", e)))?;
+        } else if maildir_subdir == "new" {
+            self.maildir.store_new(&message.raw.unwrap()).map_err(
+                |e| Error::Other(format!("Failed to store message in new: {}", e)))?;
+        } else {
+            return Err(Error::Other(format!("Invalid maildir subdirectory: {}", maildir_subdir)));
         }
         Ok(())
     }
     
-    // functions to make:
-    // - save message to maildir
-    // - get message from maildir
-    // - list messages in maildir
-    // - delete message from maildir
-
-    // - get message count in maildir
-
-    // pub fn save_message(&self, message: Message, maildir_subdir: String) -> Result<(), Error> {
-    //     let maildir_path = self.get_maildir_path();
-    //     let message_id = message.id.unwrap();
-    //     let message_path = format!("{}/{}/{}", maildir_path, maildir_subdir, message_id);
-    //     println!("Saving message to {}", message_path);
-    //     std::fs::write(&message_path, message.raw.unwrap_or_default()).map_err(|e| Error::Other(e.to_string()))?;
-    //     println!("Message saved successfully to {}", message_path);
-    //     Ok(())
-    // }
-
-    // // need to search in maildir_subdir for message_id (curr, temp, new)
-    // pub fn get_message(&self, message_id: String) -> Result<Message, Error> {
-    //     let maildir_path = self.get_maildir_path();
-    //     let maildir_subdir = ["cur", "tmp", "new"];
-    //     for subdir in maildir_subdir {
-    //         let message_path = format!("{}/{}/{}", maildir_path, subdir, message_id);
-    //         if std::fs::exists(&message_path).unwrap_or(false) {
-    //             let message = std::fs::read_to_string(&message_path).map_err(|e| Error::Other(e.to_string()))?;
-    //             return Ok(serde_json::from_str(message.as_str()).map_err(|e| Error::Other(e.to_string()))?);
-    //         }
-    //     }
-    //     return Err(Error::Other("Message not found".to_string()));
-    // }
 }

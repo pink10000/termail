@@ -351,6 +351,55 @@ impl Backend for GmailBackend {
 
                 println!("Sync From Cloud Gmail called");
                 
+                let last_sync_id = self.maildir_manager.as_ref().unwrap().get_last_sync_id();
+                println!("last sync id: {:?}", last_sync_id);
+
+                if last_sync_id == 0 {
+                    println!("FULL SYNC HAPPENING");
+                    // full_sync()
+                    
+                } else {
+                    
+                    let result = self.hub.as_ref().unwrap()
+                        .users()
+                        .history_list("me")
+                        .start_history_id(last_sync_id)
+                        .doit()
+                        .await;
+
+                    match result {
+                        Ok(result) => {
+                            println!("history list result: {:?}", result.1);
+                            println!("INCREMENTAL SYNC HAPPENING");
+                            // incremental_sync()
+                        }
+                        Err(e) => {
+                            if e.to_string().contains("404") {
+                                // smart_sync()
+                                // TODO worry about this later
+                                // idea is get every email in cloud mailbox but only get the minimal info
+                                // compare gmail message id with maildir message id using map stored in sync_state.json
+                                // if gmail message id is not in the map, then save the email to maildir
+                                // if gmail message id is in the map, then compare the email content
+                                // if the email content is different, then save the email to maildir
+                                // if the email content is the same, then do not save the email to maildir
+                                // save the map to sync_state.json
+                                
+                                // if gmail deleted the email from cloud, then delete the email from maildir
+                                // if there are emails in maildir that are not in the cloud then delete email from maildir
+
+                                println!("SMART SYNC HAPPENING");
+                            } else {
+                                return Err(Error::Connection(format!("Failed to fetch history: {}", e)));
+                            }
+                        }
+                    }
+                    
+                }
+
+                // let last_sync_id = self.maildir_manager.as_ref().unwrap().get_last_sync_id();
+                // println!("last sync id: {:?}", last_sync_id);
+
                 // let profile_result = self.hub.as_ref().unwrap()
                 //     .users()
                 //     .get_profile("me")
@@ -372,39 +421,39 @@ impl Backend for GmailBackend {
                 //     .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
 
                 // println!("history list result: {:?}", result.1);
-
-                let result = self.hub.as_ref().unwrap()
-                    .users()
-                    .messages_list("me")
-                    .max_results(1)
-                    // .page_token("03683800523264572113")
-                    .doit()
-                    .await
-                    .map_err(|e| Error::Connection(format!("Failed to fetch inbox: {}", e)))?;
+// ------
+                // let result = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .messages_list("me")
+                //     .max_results(1)
+                //     // .page_token("03683800523264572113")
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to fetch inbox: {}", e)))?;
                 
-                let messages: Vec<Message> = result.1.messages.unwrap_or_default();
-                println!("emails: {:?}", messages);
-                println!("messages count: {:?}", messages.len());
+                // let messages: Vec<Message> = result.1.messages.unwrap_or_default();
+                // println!("emails: {:?}", messages);
+                // println!("messages count: {:?}", messages.len());
 
-                let next_page_token = result.1.next_page_token;
-                println!("next page token: {:?}", next_page_token);
+                // let next_page_token = result.1.next_page_token;
+                // println!("next page token: {:?}", next_page_token);
 
-                let message_id = messages.first().unwrap().id.clone().unwrap();
+                // let message_id = messages.first().unwrap().id.clone().unwrap();
 
-                let message_response = self.hub.as_ref().unwrap()
-                    .users()
-                    .messages_get("me", message_id.as_str())
-                    .format("raw")
-                    .doit()
-                    .await
-                    .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
+                // let message_response = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .messages_get("me", message_id.as_str())
+                //     .format("raw")
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
                         
-                let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
-                println!("message: {:?}", message);
+                // let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
+                // println!("message: {:?}", message);
 
 
-                self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
-
+                // self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
+// -----------
 
                 // let res = self.maildir_manager.as_ref().unwrap().save_message(messages.first().unwrap().clone(), "cur".to_string());
                 // if res.is_err() {
