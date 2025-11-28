@@ -18,7 +18,7 @@ pub struct GmailBackend {
     hub: Option<Box<GmailHub>>,
     filter_labels: Option<Vec<String>>,
     editor: String,
-    maildir_manager: Option<MaildirManager>,
+    maildir_manager: MaildirManager,
 }
 
 impl GmailBackend {
@@ -28,7 +28,10 @@ impl GmailBackend {
             hub: None,
             filter_labels: config.filter_labels.clone(),
             editor,
-            maildir_manager: Some(MaildirManager::new(config.maildir_path.clone()).unwrap()),
+            maildir_manager: MaildirManager::new(config.maildir_path.clone()).unwrap_or_else(|e| {
+                eprintln!("Failed to create maildir manager: {}", e);
+                std::process::exit(1);
+            }),
         }
     }
 
@@ -234,34 +237,49 @@ impl GmailBackend {
         Ok(draft)
     }
 
+    async fn incremental_sync(&self) -> Result<(), Error> {
+        println!("INCREMENTAL SYNC HAPPENING");
+        Ok(())
+    }
+
+    async fn smart_sync(&self) -> Result<(), Error> {
+        println!("SMART SYNC HAPPENING");
+        Ok(())
+    }
 
     async fn full_sync(&self) -> Result<(), Error> {
         println!("FULL SYNC HAPPENING");
         
-        // let emails: Vec<Message> = Vec::new();
         let mut page_token: Option<String> = None;
-
         let mut num_emails = 0;
 
+        let mut updates = Vec::new();
+
         loop {
+            // build request
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
                 .max_results(500);
             
+            // add page token if it exists
             if let Some(token) = page_token {
                 request = request.page_token(&token);
             }
             
+            // send request
             let result = request.doit().await.map_err(|e| Error::Connection(format!("Failed to fetch messages: {}", e)))?;
             
+            // update page token
             page_token = result.1.next_page_token;
             println!("next page token: {:?}", page_token);
             
             let messages: Vec<Message> = result.1.messages.unwrap_or_default();
 
+            // iterate through messages
             for message in messages {
-
+                
+                // fetch message
                 let message_response = self.hub.as_ref().unwrap()
                     .users()
                     .messages_get("me", message.id.unwrap().as_str())
@@ -275,14 +293,15 @@ impl GmailBackend {
 
                         // Save message to correct maildir subdirectory
                         // message will either have label READ or UNREAD
+                        let maildir_id: String;
                         if message.1.label_ids.clone().unwrap_or_default().contains(&"READ".to_string()) {
-                            self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
+                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
                         } else {
-                            self.maildir_manager.as_ref().unwrap().save_message(message.1, "new".to_string()).unwrap();
+                            maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
                         } 
                         
-                        // TODO update sync_state.json with new last_sync_id and mapping from gmail message id to maildir message id
-                        // this will be useful for incremental and smart sync
+                        updates.push((message.1.id.unwrap().clone(), maildir_id));
+
                         println!("Number of emails saved: {:?}", num_emails);
                         num_emails += 1;
 
@@ -294,6 +313,10 @@ impl GmailBackend {
 
             }
 
+            // update sync state
+            self.update_sync_state(&updates).unwrap();
+
+            // break if no more pages
             if page_token.is_none() {
                 break;
             }
@@ -304,14 +327,21 @@ impl GmailBackend {
         Ok(())
     }
 
+    fn update_sync_state(&self, updates: &[(String, String)]) -> Result<(), Error> {
+        println!("Updating sync_state.json");
 
-    async fn incremental_sync(&self) -> Result<(), Error> {
-        println!("INCREMENTAL SYNC HAPPENING");
-        Ok(())
-    }
+        let sync_state_path = self.maildir_manager.get_sync_state_path();
+        
+        // load sync state from file
+        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
+        // update sync state
+        for (message_id, maildir_id) in updates {
+            sync_state.message_id_to_maildir_id.insert(message_id.clone(), maildir_id.clone());
+        }
 
-    async fn smart_sync(&self) -> Result<(), Error> {
-        println!("SMART SYNC HAPPENING");
+        // save sync state to file
+        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
+
         Ok(())
     }
 }
@@ -432,7 +462,7 @@ impl Backend for GmailBackend {
 
                 println!("Sync From Cloud Gmail called");
                 
-                let last_sync_id = self.maildir_manager.as_ref().unwrap().get_last_sync_id();
+                let last_sync_id = self.maildir_manager.get_last_sync_id();
                 println!("last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 {
