@@ -111,16 +111,32 @@ impl From<String> for EmailSender {
 
 impl std::fmt::Display for EmailSender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = match &self.name {
-            Some(name) => name.clone(),
-            None => self.email.clone()
-        };
-        let displayed_text = if let Some(p) = f.precision() {
-             format!("{:.1$}", content, p) 
+        let content = self.display_name();        
+        if let Some(p) = f.precision() {
+            // Truncate to precision 'p' then pad
+            f.pad(&format!("{:.1$}", content, p))
         } else {
-             content
-        };
-        f.pad(&displayed_text)
+            f.pad(content)
+        }
+    }
+}
+
+impl EmailSender {
+    /// Returns just the name (or email fallback).
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.email)
+    }
+
+    pub fn formatted_email(&self) -> String {
+        format!("<{}>", self.email)
+    }
+
+    /// Returns the standard "Name <email>" format.
+    pub fn full_string(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{} <{}>", name, self.email),
+            None => self.email.clone(),
+        }
     }
 }
 
