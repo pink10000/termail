@@ -293,6 +293,10 @@ impl GmailBackend {
         let to_delete_ids = &local_ids - &all_gmail_ids;
         let to_update_ids = &all_gmail_ids & &local_ids;
 
+        println!("to_add_ids size: {:?}", to_add_ids.len());
+        println!("to_delete_ids size: {:?}", to_delete_ids.len());
+        println!("to_update_ids size: {:?}", to_update_ids.len());
+
         // Downlaod new messages
         let mut sync_updates_to_add: Vec<(String, String)> = Vec::new();
 
@@ -388,10 +392,10 @@ impl GmailBackend {
                         // Save message to correct maildir subdirectory
                         // message will either have label READ or UNREAD
                         let maildir_id: String;
-                        if message.1.label_ids.clone().unwrap_or_default().contains(&"READ".to_string()) {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
-                        } else {
+                        if message.1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string()) {
                             maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
+                        } else {
+                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
                         } 
                         
                         updates.push((message.1.id.unwrap().clone(), maildir_id));
@@ -406,7 +410,6 @@ impl GmailBackend {
                 }
 
             }
-
             // update sync state
             self.update_sync_state(&updates).unwrap();
 
