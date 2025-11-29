@@ -2,6 +2,7 @@ use super::{Backend, Error};
 use crate::config::BackendConfig;
 use crate::plugins::events::Hook;
 use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label, MimeType};
+use std::collections::HashSet;
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use tempfile::{NamedTempFile};
@@ -244,12 +245,104 @@ impl GmailBackend {
 
     async fn smart_sync(&self) -> Result<(), Error> {
         println!("SMART SYNC HAPPENING");
+
+        // Get all current gmail message ids
+        let mut all_gmail_ids: HashSet<String> = HashSet::new();
+        let mut page_token: Option<String> = None;
+        
+        loop {
+            // build request
+            let mut request = self.hub.as_ref().unwrap()
+                .users()
+                .messages_list("me")
+                .add_label_ids("INBOX")
+                .max_results(500);
+            
+            // add page token if it exists
+            if let Some(token) = page_token {
+                request = request.page_token(&token);
+            }
+            
+            // send request
+            let result = request.doit().await
+                .map_err(|e| Error::Connection(format!("Failed to list messages: {}", e)))?;
+            
+            // add messages to set
+            if let Some(messages) = result.1.messages {
+                for msg in messages {
+                    match msg.id {
+                        Some(id) => all_gmail_ids.insert(id),
+                        None => false,
+                    };
+                }
+            }
+            
+            // update page token and break if no more pages
+            page_token = result.1.next_page_token;
+            if page_token.is_none() {
+                break;
+            }
+        }
+        // Get all current maildir message ids
+        let sync_state_path = self.maildir_manager.get_sync_state_path();
+        let sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
+        let local_ids: HashSet<String> = sync_state.message_id_to_maildir_id.keys().cloned().collect();
+    
+        // Find differences
+        let to_add_ids = &all_gmail_ids - &local_ids;
+        let to_delete_ids = &local_ids - &all_gmail_ids;
+        let to_update_ids = &all_gmail_ids & &local_ids;
+
+        // Downlaod new messages
+        let mut sync_updates_to_add: Vec<(String, String)> = Vec::new();
+
+        for id in to_add_ids {
+            let message_response = self.hub.as_ref().unwrap()
+                .users()
+                .messages_get("me", id.as_str())
+                .format("raw")
+                .doit()
+                .await
+                .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
+            
+            match message_response {
+                Ok(message) => {
+                    
+                    // Save message to correct maildir subdirectory
+                    let maildir_id: String;
+                        if message.1.label_ids.clone().unwrap_or_default().contains(&"READ".to_string()) {
+                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
+                        } else {
+                            maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
+                        } 
+                    
+                    // Add to sync updates to add
+                    sync_updates_to_add.push((id.clone(), maildir_id));
+                    
+                }
+                Err(e) => {
+                    return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
+                }
+            }
+        }
+        // update sync state with new messages
+        self.update_sync_state(&sync_updates_to_add).unwrap();
+
+        // Take care of deleted messages
+        
+        // update sync state with deleted messages
+        
+        
+        // Update existing messagse if needed
+
+        // Update last_sync_id and sync_state
+
         Ok(())
     }
 
     async fn full_sync(&self) -> Result<(), Error> {
         println!("FULL SYNC HAPPENING");
-        
+        // TODO: can later get progress
         let mut page_token: Option<String> = None;
         let mut num_emails = 0;
 
@@ -260,6 +353,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
+                .add_label_ids("INBOX")
                 .max_results(500);
             
             // add page token if it exists
@@ -268,11 +362,11 @@ impl GmailBackend {
             }
             
             // send request
-            let result = request.doit().await.map_err(|e| Error::Connection(format!("Failed to fetch messages: {}", e)))?;
+            let result = request.doit().await
+                .map_err(|e| Error::Connection(format!("Failed to fetch messages: {}", e)))?;
             
             // update page token
             page_token = result.1.next_page_token;
-            println!("next page token: {:?}", page_token);
             
             let messages: Vec<Message> = result.1.messages.unwrap_or_default();
 
@@ -465,7 +559,7 @@ impl Backend for GmailBackend {
                 let last_sync_id = self.maildir_manager.get_last_sync_id();
                 println!("last sync id: {:?}", last_sync_id);
 
-                if last_sync_id == 0 {
+                if last_sync_id == 0 && !self.maildir_manager.has_synced_emails()? {
                     self.full_sync().await?;
                     
                 } else {
@@ -484,19 +578,7 @@ impl Backend for GmailBackend {
                         }
                         Err(e) => {
                             if e.to_string().contains("404") {
-                                // smart_sync()
-                                // TODO worry about this later
-                                // idea is get every email in cloud mailbox but only get the minimal info
-                                // compare gmail message id with maildir message id using map stored in sync_state.json
-                                // if gmail message id is not in the map, then save the email to maildir
-                                // if gmail message id is in the map, then compare the email content
-                                // if the email content is different, then save the email to maildir
-                                // if the email content is the same, then do not save the email to maildir
-                                // save the map to sync_state.json
                                 
-                                // if gmail deleted the email from cloud, then delete the email from maildir
-                                // if there are emails in maildir that are not in the cloud then delete email from maildir
-
                                 self.smart_sync().await?;
                             } else {
                                 return Err(Error::Connection(format!("Failed to fetch history: {}", e)));

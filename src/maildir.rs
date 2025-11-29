@@ -69,6 +69,12 @@ impl MaildirManager {
         self.sync_state.sync_state_path.clone()
     }
 
+    pub fn has_synced_emails(&self) -> Result<bool, Error> {
+        // Check if message_id_map has any entries
+        let state = MaildirManager::load_sync_state_from_file(&self.sync_state.sync_state_path)?;
+        Ok(!state.message_id_to_maildir_id.is_empty())
+    }
+
     // load sync state from file and parse it into a SyncState struct
     pub fn load_sync_state_from_file(sync_state_path: &Path) -> Result<SyncState, Error> {
         let content = std::fs::read_to_string(sync_state_path).map_err(
