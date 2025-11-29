@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::{
-    types::EmailMessage, 
+    core::email::EmailMessage,
     ui::app::{ActiveViewState, App},
     ui::components::{composer_view::Composer, folder_pane::FolderPane, inbox::Inbox, message_view::MessageView},
 };

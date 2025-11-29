@@ -1,7 +1,8 @@
 use super::{Backend, Error};
 use crate::config::BackendConfig;
 use crate::plugins::events::Hook;
-use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label, MimeType};
+use crate::cli::command::{Command, CommandResult};
+use crate::core::{email::{EmailMessage, EmailSender, MimeType}, label::Label};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};

@@ -3,7 +3,7 @@ use crate::ui::{
     event::AppEvent,
     app::{App, ActiveViewState, BaseViewState, ComposeViewState, ComposeViewField, MessageViewState},
 };
-use crate::types::EmailMessage;
+use crate::core::email::EmailMessage;
 use crate::error::Error;
 
 /// Input handling for the App
@@ -143,7 +143,7 @@ impl App {
     /// the height without knowing the UI layout.
     /// 
     /// Note that the `content_height` is estimated, and may not be exact. See the
-    /// comment about using `term_w` in `handle_key_base_view()` for more details.
+    /// comment about using `term_w` in `handle_base_view()` for more details.
     /// Ideally, this value is determined by the height of the AppLayouts.middle
     /// rectangle, but its implementation would remove the separations of concerns
     /// as the App State would require the knowledge of the UI layout, which already

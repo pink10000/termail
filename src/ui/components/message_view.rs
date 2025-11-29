@@ -4,7 +4,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
-use crate::types::EmailMessage;
+use crate::core::email::EmailMessage;
 use crate::ui::app::MessageViewState;
 
 pub struct MessageView<'a> {

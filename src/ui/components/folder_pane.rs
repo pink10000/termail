@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, Widget},
 };
-use crate::types::Label;
+use crate::core::label::Label;
 use crate::ui::app::BaseViewState;
 
 pub struct FolderPane<'a> {

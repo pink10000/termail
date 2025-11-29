@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::types::{EmailMessage, Label};
+use crate::core::{email::EmailMessage, label::Label};
 use crate::error::Error;
 
 const TICK_FPS: f64 = 30.0;

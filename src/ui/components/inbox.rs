@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    types::EmailMessage, 
+    core::email::EmailMessage,
     ui::app::BaseViewState,
 };
 

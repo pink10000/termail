@@ -1,7 +1,8 @@
 // This file contains the application logic for the termail UI.
 
 use ratatui::DefaultTerminal;
-use crate::types::{Command, EmailMessage, Label, CommandResult};
+use crate::cli::command::{Command, CommandResult};
+use crate::core::{email::EmailMessage, label::Label};
 use crate::ui::event::{AppEvent, Event, EventHandler};
 use crate::config::Config;
 use crate::error::Error;

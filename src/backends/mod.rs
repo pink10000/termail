@@ -4,7 +4,7 @@ pub mod greenmail;
 pub mod gmail;
 use crate::error::Error;
 use crate::config::BackendConfig;
-use crate::types::{Command, CommandResult};
+use crate::cli::command::{Command, CommandResult};
 use async_trait::async_trait;
 use crate::plugins::plugins::PluginManager;
 use std::fmt;
