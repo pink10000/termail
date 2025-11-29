@@ -108,13 +108,12 @@ impl MaildirManager {
         Ok(())
     }
 
-    pub fn maildir_move_cur_to_new(&self, maildir_id: &String) -> Result<(), Error> {
+    pub fn maildir_move_cur_to_new(&self, maildir_id: &String) -> Result<String, Error> {
         // find message in cur
         let mail_entry = self.maildir.find(maildir_id.as_str())
             .ok_or_else(|| Error::Other(format!("Message not found: {}", maildir_id)))?;
         
         let path = mail_entry.path();
-        // println!("Message path: {:?}", path);
         
         // Read the raw message content from the file
         let raw_content = std::fs::read(path)
@@ -124,10 +123,10 @@ impl MaildirManager {
         self.maildir.delete(&maildir_id)?;
         
         // move message to new
-        self.maildir.store_new(&raw_content)
+        let new_maildir_id = self.maildir.store_new(&raw_content)
             .map_err(|e| Error::Other(format!("Failed to store in new: {}", e)))?;
         
-        Ok(())
+        Ok(new_maildir_id)
     }
 
     pub fn get_message_directory(&self, maildir_id: &String) -> Result<String, Error> {

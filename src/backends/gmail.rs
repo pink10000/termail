@@ -255,7 +255,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("INBOX")
+                .add_label_ids("SPAM")
                 .max_results(500);
             
             // add page token if it exists
@@ -346,6 +346,8 @@ impl GmailBackend {
         
         // Update existing messagse if needed
         println!("Updating existing messages");
+        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
+
         for gmail_id in to_update_ids {
             // if message was updated (read or unread) then we need to update the message in the maildir
             let metadata_response = self.hub.as_ref().unwrap()
@@ -360,24 +362,23 @@ impl GmailBackend {
             let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
 
             // figure out if message is read or unread
-            let is_read = metadata_response.unwrap().1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string());
+            let is_read = !metadata_response.unwrap().1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string());
 
             // need to see which directory our message is in and if different from cloud label then we need to move it
             let maildir_directory = self.maildir_manager.get_message_directory(&maildir_id).unwrap();
-            // println!("Maildir directory: {:?}", maildir_directory);
-
             
             if !is_read && maildir_directory == "cur" {
                 // if not read in cloud but read locally then move message to new in maildir
-                self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
-                println!("---------------------------------------------------Moved message to new");
+                let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
+                sync_state.message_id_to_maildir_id.remove(&gmail_id);
+                sync_state.message_id_to_maildir_id.insert(gmail_id.clone(), new_maildir_id);
 
             } else if is_read && maildir_directory == "new" {
                 // if read in cloud but in new then move message to cur in maildir
                 self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
-                println!("---------------------------------------------------Moved message to cur");
             }
         }
+        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
 
 
         // Update last_sync_id and sync_state
@@ -398,7 +399,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("INBOX")
+                .add_label_ids("SPAM")
                 .max_results(500);
             
             // add page token if it exists
