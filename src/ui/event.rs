@@ -4,7 +4,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::types::{EmailMessage, Label};
-use crate::ui::app::ActiveViewState;
 use crate::error::Error;
 
 const TICK_FPS: f64 = 30.0;
@@ -22,7 +21,6 @@ pub enum Event {
 
 #[derive(Clone, Debug)]
 pub enum AppEvent {
-    ChangeViewState(ActiveViewState),
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
     Quit

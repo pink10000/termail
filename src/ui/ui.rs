@@ -1,12 +1,15 @@
 use ratatui::{
     buffer::Buffer, 
-    layout::{Constraint, Direction, Layout, Rect}, 
-    style::{Color, Style, Stylize, Modifier}, 
-    widgets::{Block, Borders, Paragraph, Widget, List, ListItem, ListState, BorderType},
-    text::{Line, Span}
+    layout::{Alignment, Constraint, Direction, Layout, Rect}, 
+    style::{Color, Modifier, Style, Stylize}, 
+    text::{Line, Span}, 
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Widget}
 };
 
-use crate::{types::{EmailMessage, EmailSender}, ui::app::{ActiveViewState, App, BaseViewState}};
+use crate::{
+    types::{EmailMessage, EmailSender}, 
+    ui::app::{ActiveViewState, App, BaseViewState, ComposeViewState, ComposeViewField}
+};
 use crate::types::Label;
 
 /// Helper function to create a ListItem from a Label
@@ -82,7 +85,7 @@ impl App {
     /// Calculate all layout rectangles for the UI
     fn create_layouts(&self, area: Rect) -> AppLayouts {
         // Main vertical layout: top bar, middle section, bottom bar
-        let main_layout = Layout::default()
+        let top_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![
                 Constraint::Length(3), 
@@ -91,9 +94,9 @@ impl App {
             ])
             .split(area);
         
-        let top_bar = main_layout[0];
-        let middle = main_layout[1];
-        let bottom_bar = main_layout[2];
+        let top_bar = top_layout[0];
+        let middle = top_layout[1];
+        let bottom_bar = top_layout[2];
 
         AppLayouts { top_bar, middle, bottom_bar }
     }
@@ -232,7 +235,7 @@ impl App {
         &self,
         area: Rect,
         buf: &mut Buffer,
-        email_body: String,
+        email_body: &String,
         email_from: &EmailSender,
         scroll: u16,
     ) {
@@ -248,13 +251,117 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
         
-        let paragraph = Paragraph::new(email_body)
+        let paragraph = Paragraph::new(email_body.clone())
             .fg(Color::White)
             .wrap(ratatui::widgets::Wrap { trim: false }) 
             .scroll((scroll, 0))
             .block(block);
         
         paragraph.render(area, buf);
+    }
+
+    /// Renders the compose pane.
+    /// 
+    /// The compose pane is a vertical layout with a header and a body. The 
+    /// header is a horizontal layout with a label and input field. There are
+    /// two of these fields (extensible, to add CC and BCC fields).
+    /// 
+    /// The body is a vertical layout with text from the temporary file.
+    fn render_compose_pane(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        compose_state: &ComposeViewState
+    ) {
+        let selected_field = &compose_state.current_field;
+
+        let top_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(4), // 2 for borders, 2 for subject, to
+                Constraint::Min(3), // 2 for border, 1 for body
+                ])
+            .split(area);
+        
+        let header_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(if *selected_field == ComposeViewField::To || *selected_field == ComposeViewField::Subject {
+                Style::default().fg(Color::Magenta)
+            } else {
+                Style::default().fg(Color::White)
+            });
+
+        let header_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // To field
+                Constraint::Length(1), // Subject Field
+            ])
+            .split(header_block.inner(top_layout[0]));
+        header_block.render(top_layout[0], buf);
+        
+        // Helper to split a row into [Label, Input]
+        let split_row = |rect: Rect| {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(10), Constraint::Min(1)])
+                .split(rect)
+        };
+        
+        let to_area = split_row(header_layout[0]);
+        let subject_area = split_row(header_layout[1]);
+
+        Paragraph::new("To:")
+            .alignment(Alignment::Right)
+            .style(if matches!(selected_field, ComposeViewField::To) { 
+                Style::new().fg(Color::Magenta)
+            } else { 
+                Style::new().fg(Color::White)
+            })
+            .add_modifier(Modifier::BOLD)
+            .render(to_area[0], buf);
+
+        Paragraph::new(compose_state.draft.to.clone())
+            .alignment(Alignment::Left)
+            .render(to_area[1], buf);
+
+        Paragraph::new("Subject:")
+            .alignment(Alignment::Right)
+            .style(if matches!(selected_field, ComposeViewField::Subject) { 
+                Style::new().fg(Color::Magenta)
+            } else { 
+                Style::new().fg(Color::White)
+            })
+            .add_modifier(Modifier::BOLD)
+            .render(subject_area[0], buf);
+
+        Paragraph::new(compose_state.draft.subject.clone())
+            .alignment(Alignment::Left)
+            .render(subject_area[1], buf);
+
+        let body_layout = top_layout[1];
+        let content = match (compose_state.draft.body.is_empty(), &compose_state.current_field) {
+            (true, ComposeViewField::Body) => {
+                format!("Press [Enter] to enter {} to write email.", self.config.termail.editor)
+            },
+            (true, _) => format!("Select to begin writing email body."),
+            (false, _) => compose_state.draft.body.clone(),
+        };
+
+        let body_block = Block::default()
+            .title("Body")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(if matches!(compose_state.current_field, ComposeViewField::Body) {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            });
+
+        Paragraph::new(content)
+            .block(body_block)
+            .render(body_layout, buf);
     }
 
 }
@@ -294,12 +401,15 @@ impl Widget for &App {
                 self.render_message_pane(
                     layouts.middle,
                     buf,
-                    email.body.clone(),
+                    &email.body,
                     &email.from,
                     view_state.scroll,
                 );
             },
-            ActiveViewState::WriteMessageView => todo!(),
+            ActiveViewState::ComposeView(compose_state) => {
+                self.render_top_bar(layouts.top_bar, buf, "Compose Email".to_string());
+                self.render_compose_pane(layouts.middle, buf, compose_state);
+            },
         }
     }
 }

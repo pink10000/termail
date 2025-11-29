@@ -28,6 +28,21 @@ pub struct MessageViewState {
     pub content_height: u16,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ComposeViewField {
+    To,
+    Subject,
+    Body,
+}
+
+#[derive(Clone, Debug)]
+pub struct ComposeViewState {
+    /// The draft email being composed
+    pub draft: EmailMessage,
+    /// Current field being edited
+    pub current_field: ComposeViewField,
+}
+
 #[derive(Clone, Debug)]
 pub enum ActiveViewState {
     /// This state holds the base view of the application, which is the sidebar 
@@ -36,7 +51,7 @@ pub enum ActiveViewState {
     /// This state indicates that the user is viewing a single email message.
     MessageView(MessageViewState),
     /// This state indicates that the user is writing a new email message.
-    WriteMessageView,
+    ComposeView(ComposeViewState),
 }
 
 pub struct App {
@@ -117,7 +132,6 @@ impl App {
                     AppEvent::Quit => self.quit(),
                     AppEvent::EmailsFetched(emails) => self.emails = Some(emails),
                     AppEvent::LabelsFetched(labels) => self.labels = Some(labels),
-                    AppEvent::ChangeViewState(view) => self.state = view,
                 }
             }
         }        
@@ -135,7 +149,7 @@ impl App {
             // TODO: if an editor is defined, it should drop us into that editor, 
             // such that we can write the email there. If the email is done being
             // written, exiting the program should return back to termail. 
-            ActiveViewState::WriteMessageView => self.handle_key_write_view(key_event)?,
+            ActiveViewState::ComposeView(_) => self.handle_key_compose_view(key_event)?,
         }
         Ok(())
     }
@@ -145,6 +159,14 @@ impl App {
     fn handle_key_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {
         match (b, key_event.code) {
             (_, KeyCode::Esc) => self.events.send(AppEvent::Quit),
+            
+            // Handle Compose View
+            (_, KeyCode::Char('c')) | (_, KeyCode::Char('C')) => {
+                self.state = ActiveViewState::ComposeView(ComposeViewState {
+                    draft: EmailMessage::new(),
+                    current_field: ComposeViewField::To,
+                });
+            },
 
             // Handle View Cycling
             (BaseViewState::Labels, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
@@ -166,10 +188,7 @@ impl App {
                 // due to the rendering of the top bar. However, since the top bar is 3 lines, this 
                 // discrepancy is acceptable.
                 //
-                // Estimates visual lines by simulating word wrapping.
-                // 
-                // For each `\n`, we get at least one line. For each word, 
-                // we check divide the words into chunks of the max width,
+                // For each `\n`, we get at least one line. For each word, we divide the words into chunks of the max width,
                 // and add the number of chunks - 1 to the line count.
                 let content_height = selected_email.body
                     .lines()
@@ -184,15 +203,8 @@ impl App {
     }
 
     /// This function changes the scroll offset of the MessageViewState
-    /// Because the `scroll` field is a u16, we can use self.scroll.saturating_sub(1) 
-    /// to prevent underflow, and self.scroll.saturating_add(1) to prevent overflow.
-    /// However, since ratatui's `Paragraph` widget does not limit how far we can 
-    /// scroll down, we need to use the height of the Paragraph widget and 
-    /// limit the scroll by 
-    /// 
-    /// let overflow = 15
-    /// if `height` < overflow, then max_scroll = height
-    /// else max_scroll = height - overflow
+    /// Since ratatui's `Paragraph` widget does not limit how far we can scroll down, 
+    /// scroll down, we need to use the height of the Paragraph widget.
     /// 
     /// Note that the value 15 is arbitrary, and can be changed to any value.
     /// TODO: Make this configurable by the config.toml file OR a way to determine
@@ -204,10 +216,10 @@ impl App {
     /// rectangle, but its implementation would remove the separations of concerns
     /// as the App State would require the knowledge of the UI layout, which already
     /// requires knowledge of the App State. So for now, we'll just do a rough estimate.
-    pub fn change_scroll(&mut self, amount: i16) {
+    pub fn change_scroll(&mut self, amount: i16) -> Result<(), Error> {
         let view_state = match &mut self.state {
             ActiveViewState::MessageView(view_state) => view_state,
-            _ => return, // This should never happen, but we need to return something to satisfy the compiler.
+            _ => return Err(Error::Other("Not in message view".to_string())),
         };
         let overflow = 15;
         let max_scroll = view_state.content_height.saturating_sub(overflow);
@@ -216,34 +228,42 @@ impl App {
         } else {
             view_state.scroll = view_state.scroll.saturating_sub(1).clamp(0, max_scroll);
         }
+        Ok(())
     }
 
     /// Handles key events for the message view.
     /// 
     /// Supports scrolling through the message body.
-    fn handle_key_message_view(
-        &mut self,
-        key_event: KeyEvent,
-        // view_state: &mut MessageViewState
-    ) -> Result<(), Error> {
+    fn handle_key_message_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
         match key_event.code {
-            KeyCode::Esc => self.return_to_base_view(),
-            // Basic line-by-line scrolling
-            KeyCode::Down => {
-                self.change_scroll(1);
-            }
-            KeyCode::Up => {
-                self.change_scroll(-1);
-            }
+            KeyCode::Esc => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
+            KeyCode::Down => self.change_scroll(1)?,
+            KeyCode::Up => self.change_scroll(-1)?,
             _ => {}
         }
         Ok(())
     }
 
-    /// Handles the key events for the write view. 
-    fn handle_key_write_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+    /// Handles the key events for the compose view. 
+    fn handle_key_compose_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+        let cvs = match &mut self.state {
+            ActiveViewState::ComposeView(cvs) => cvs,
+            _ => return Err(Error::Other("Not in compose view".to_string())),
+        };
         match key_event.code {
-            KeyCode::Esc => self.return_to_base_view(),
+            // TODO: A pop up to confirm that the user wants to exit the compose view.
+            // Should also be in the config file if the user wants this popup to appear.
+            KeyCode::Esc => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
+            KeyCode::Down => match cvs.current_field {
+                ComposeViewField::To => cvs.current_field = ComposeViewField::Subject,
+                ComposeViewField::Subject => cvs.current_field = ComposeViewField::Body,
+                ComposeViewField::Body => cvs.current_field = ComposeViewField::To,
+            },
+            KeyCode::Up => match cvs.current_field {
+                ComposeViewField::To => cvs.current_field = ComposeViewField::Body,
+                ComposeViewField::Subject => cvs.current_field = ComposeViewField::To,
+                ComposeViewField::Body => cvs.current_field = ComposeViewField::Subject,
+            },
             _ => {}
         }
         Ok(())
@@ -251,10 +271,6 @@ impl App {
 
     pub fn quit(&mut self) {
         self.running = false;
-    }
-
-    fn return_to_base_view(&mut self) {
-        self.events.send(AppEvent::ChangeViewState(ActiveViewState::BaseView(BaseViewState::Inbox)));
     }
 
     /// Hovers the next email in the list
