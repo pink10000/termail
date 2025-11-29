@@ -20,13 +20,21 @@ pub enum BaseViewState {
     Inbox,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug)]
+pub struct MessageViewState {
+    /// Vertical scroll offset (in lines) for the message view
+    pub scroll: u16,
+    /// The height of the Paragraph widget
+    pub content_height: u16,
+}
+
+#[derive(Clone, Debug)]
 pub enum ActiveViewState {
     /// This state holds the base view of the application, which is the sidebar 
     /// with labels, and the inbox view. 
     BaseView(BaseViewState),
     /// This state indicates that the user is viewing a single email message.
-    MessageView,
+    MessageView(MessageViewState),
     /// This state indicates that the user is writing a new email message.
     WriteMessageView,
 }
@@ -121,9 +129,9 @@ impl App {
     /// First, `handle_key_events()` checks the current view state, and delegates to 
     /// the appropriate handler for the current view state. 
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> Result<(), Error> {
-        match self.state {
-            ActiveViewState::BaseView(b) => self.handle_key_base_view(key_event, b)?,
-            ActiveViewState::MessageView => self.handle_key_message_view(key_event)?,
+        match &self.state {
+            ActiveViewState::BaseView(b) => self.handle_key_base_view(key_event, *b)?,
+            ActiveViewState::MessageView(_) => self.handle_key_message_view(key_event)?,
             // TODO: if an editor is defined, it should drop us into that editor, 
             // such that we can write the email there. If the email is done being
             // written, exiting the program should return back to termail. 
@@ -137,26 +145,96 @@ impl App {
     fn handle_key_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {
         match (b, key_event.code) {
             (_, KeyCode::Esc) => self.events.send(AppEvent::Quit),
-            (_, KeyCode::Tab) => self.state = match b {
-                BaseViewState::Labels => ActiveViewState::BaseView(BaseViewState::Inbox),
-                BaseViewState::Inbox => ActiveViewState::BaseView(BaseViewState::Labels),
-            },
+
+            // Handle View Cycling
+            (BaseViewState::Labels, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
+            (BaseViewState::Inbox, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Labels),
+               
             // TODO: Handle scrolling through the labels.
             (BaseViewState::Inbox, KeyCode::Down) => self.hover_next_email(),
             (BaseViewState::Inbox, KeyCode::Up) => self.hover_previous_email(),
-            (BaseViewState::Inbox, KeyCode::Enter) => self.state = ActiveViewState::MessageView,            
+            (BaseViewState::Inbox, KeyCode::Enter) => {
+                // Enter the message view with initial scroll position at the top
+                let selected_email = self.selected_email_index
+                    .and_then(|index| self.emails.as_ref()?.get(index))
+                    .cloned()
+                    .unwrap_or_else(EmailMessage::new);
+                
+                let (term_w, _) = ratatui::crossterm::terminal::size().unwrap();
+
+                // Since we're using the terminal as the height, we will overcount a couple of lines
+                // due to the rendering of the top bar. However, since the top bar is 3 lines, this 
+                // discrepancy is acceptable.
+                //
+                // Estimates visual lines by simulating word wrapping.
+                // 
+                // For each `\n`, we get at least one line. For each word, 
+                // we check divide the words into chunks of the max width,
+                // and add the number of chunks - 1 to the line count.
+                let content_height = selected_email.body
+                    .lines()
+                    .map(|line| line.chars().count() / term_w as usize + 1) // +1 for the \n
+                    .sum::<usize>() as u16;
+
+                self.state = ActiveViewState::MessageView(MessageViewState { scroll: 0, content_height });
+            }
             _ => {}
         }
         Ok(())
     }
 
+    /// This function changes the scroll offset of the MessageViewState
+    /// Because the `scroll` field is a u16, we can use self.scroll.saturating_sub(1) 
+    /// to prevent underflow, and self.scroll.saturating_add(1) to prevent overflow.
+    /// However, since ratatui's `Paragraph` widget does not limit how far we can 
+    /// scroll down, we need to use the height of the Paragraph widget and 
+    /// limit the scroll by 
+    /// 
+    /// let overflow = 15
+    /// if `height` < overflow, then max_scroll = height
+    /// else max_scroll = height - overflow
+    /// 
+    /// Note that the value 15 is arbitrary, and can be changed to any value.
+    /// TODO: Make this configurable by the config.toml file OR a way to determine
+    /// the height without knowing the UI layout.
+    /// 
+    /// Note that the `content_height` is estimated, and may not be exact. See the
+    /// comment about using `term_w` in `handle_key_base_view()` for more details.
+    /// Ideally, this value is determined by the height of the AppLayouts.middle
+    /// rectangle, but its implementation would remove the separations of concerns
+    /// as the App State would require the knowledge of the UI layout, which already
+    /// requires knowledge of the App State. So for now, we'll just do a rough estimate.
+    pub fn change_scroll(&mut self, amount: i16) {
+        let view_state = match &mut self.state {
+            ActiveViewState::MessageView(view_state) => view_state,
+            _ => return, // This should never happen, but we need to return something to satisfy the compiler.
+        };
+        let overflow = 15;
+        let max_scroll = view_state.content_height.saturating_sub(overflow);
+        if amount > 0 {
+            view_state.scroll = view_state.scroll.saturating_add(1).clamp(0, max_scroll);
+        } else {
+            view_state.scroll = view_state.scroll.saturating_sub(1).clamp(0, max_scroll);
+        }
+    }
 
     /// Handles key events for the message view.
     /// 
-    /// TODO: Handle scrolling through the message.
-    fn handle_key_message_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+    /// Supports scrolling through the message body.
+    fn handle_key_message_view(
+        &mut self,
+        key_event: KeyEvent,
+        // view_state: &mut MessageViewState
+    ) -> Result<(), Error> {
         match key_event.code {
             KeyCode::Esc => self.return_to_base_view(),
+            // Basic line-by-line scrolling
+            KeyCode::Down => {
+                self.change_scroll(1);
+            }
+            KeyCode::Up => {
+                self.change_scroll(-1);
+            }
             _ => {}
         }
         Ok(())

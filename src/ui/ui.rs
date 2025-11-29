@@ -228,11 +228,18 @@ impl App {
         ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
     }
 
-    fn render_message_pane(&self, area: Rect, buf: &mut Buffer, email_body: String, email_from: EmailSender) {
+    fn render_message_pane(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        email_body: String,
+        email_from: &EmailSender,
+        scroll: u16,
+    ) {
         let block = Block::default()
             .title(email_from.display_name())
             .title(email_from.formatted_email())
-            .title_style(if matches!(self.state, ActiveViewState::MessageView) {
+            .title_style(if matches!(self.state, ActiveViewState::MessageView(_)) {
                 Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
@@ -241,10 +248,10 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
         
-        
         let paragraph = Paragraph::new(email_body)
             .fg(Color::White)
-            .wrap(ratatui::widgets::Wrap { trim: false }) // Needs to be set false to ensure `format_email_header` works correctly.
+            .wrap(ratatui::widgets::Wrap { trim: false }) 
+            .scroll((scroll, 0))
             .block(block);
         
         paragraph.render(area, buf);
@@ -261,7 +268,7 @@ impl Widget for &App {
         let layouts = self.create_layouts(area);
         self.render_bottom_bar(layouts.bottom_bar, buf);
 
-        match self.state {
+        match &self.state {
             ActiveViewState::BaseView(_) => {
                 let text = format!("termail - {}", self.config.termail.default_backend);
                 self.render_top_bar(layouts.top_bar, buf, text);
@@ -277,15 +284,20 @@ impl Widget for &App {
                 self.render_folder_pane(middle_layout[0], buf);
                 self.render_email_list_pane(middle_layout[1], buf);
             },
-            ActiveViewState::MessageView => {
-                // Use and_then/map to cleanly get the selected email, fall back to default if none
+            ActiveViewState::MessageView(view_state) => {
                 let email = self.selected_email_index
                     .and_then(|index| self.emails.as_ref()?.get(index))
                     .cloned()
                     .unwrap_or_else(EmailMessage::new);
 
                 self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
-                self.render_message_pane(layouts.middle, buf, email.body.clone(), email.from);
+                self.render_message_pane(
+                    layouts.middle,
+                    buf,
+                    email.body.clone(),
+                    &email.from,
+                    view_state.scroll,
+                );
             },
             ActiveViewState::WriteMessageView => todo!(),
         }
