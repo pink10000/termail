@@ -346,20 +346,38 @@ impl GmailBackend {
         
         // Update existing messagse if needed
         println!("Updating existing messages");
-        // for gmail_id in to_update_ids {
-        //     // if message was updated (read or unread) then we need to update the message in the maildir
-        //     // only get metadata from message and not the body
-        //     let message_response = self.hub.as_ref().unwrap()
-        //         .users()
-        //         .messages_get("me", gmail_id.as_str())
-        //         .format("metadata")
-        //         .doit()
-        //         .await
-        //         .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
-                
-        //      // need to see which directory our message is in and if different from cloud label then we need to move it
+        for gmail_id in to_update_ids {
+            // if message was updated (read or unread) then we need to update the message in the maildir
+            let metadata_response = self.hub.as_ref().unwrap()
+                .users()
+                .messages_get("me", gmail_id.as_str())
+                .format("metadata")
+                .doit()
+                .await
+                .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
 
-        // }
+            // get maildir id form gmail id
+            let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
+
+            // figure out if message is read or unread
+            let is_read = metadata_response.unwrap().1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string());
+
+            // need to see which directory our message is in and if different from cloud label then we need to move it
+            let maildir_directory = self.maildir_manager.get_message_directory(&maildir_id).unwrap();
+            // println!("Maildir directory: {:?}", maildir_directory);
+
+            
+            if !is_read && maildir_directory == "cur" {
+                // if not read in cloud but read locally then move message to new in maildir
+                self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
+                println!("---------------------------------------------------Moved message to new");
+
+            } else if is_read && maildir_directory == "new" {
+                // if read in cloud but in new then move message to cur in maildir
+                self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                println!("---------------------------------------------------Moved message to cur");
+            }
+        }
 
 
         // Update last_sync_id and sync_state
@@ -369,7 +387,7 @@ impl GmailBackend {
 
     async fn full_sync(&self) -> Result<(), Error> {
         println!("FULL SYNC HAPPENING");
-        // TODO: can later get progress
+        // TODO: can later get progress to show easily later
         let mut page_token: Option<String> = None;
         let mut num_emails = 0;
 
