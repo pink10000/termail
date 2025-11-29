@@ -2,7 +2,7 @@ use super::{Backend, Error};
 use crate::config::BackendConfig;
 use crate::plugins::events::Hook;
 use crate::types::{Command, CommandResult, EmailMessage, EmailSender, Label, MimeType};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
 use tempfile::{NamedTempFile};
@@ -261,22 +261,77 @@ impl GmailBackend {
 
         let curr_history_id = result.as_ref().unwrap().1.history_id.unwrap();
 
-
-
-        println!("history list result: {:?}", result.as_ref().unwrap().1);
-
         let sync_state_path = self.maildir_manager.get_sync_state_path();
         let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
 
-                // let result = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .history_list("me")
-                //     .start_history_id(2902946)
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
-                // println!("history list result: {:?}", result.1);
+        // iterate thru all the history records starting at last_sync_id
+        // make sure to go to all pages
 
+        let history_records = self.hub.as_ref().unwrap()
+            .users()
+            .history_list("me")
+            .start_history_id(last_sync_id)
+            .doit()
+            .await
+            .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
+
+        // println!("history records: {:?}", history_records.1);
+        if history_records.1.history.is_none() {
+            return Err(Error::Connection("No history records found".to_string()));
+        }
+
+        // create a map of message id to action that was taken and we overwrite if there are multiple actions for the same message since records are in chronological order
+        // TODO store msg id instaed of history id in map
+        let mut message_id_to_action: HashMap<String, String> = HashMap::new();
+
+
+        for history in history_records.1.history.unwrap() {
+            // only print a record if it has abels_added: None
+            if history.labels_added.is_some() {
+                println!("labels_added");
+
+                // if record was added Trash label then we delete from maildir
+                // if record was added Unread label then we move to new in maildir
+                for label in history.labels_added.unwrap() {
+
+                    let labels = label.label_ids.unwrap();
+
+                    if labels.contains(&"UNREAD".to_string()) {
+                        message_id_to_action.insert(history.id.unwrap().to_string(), "move_to_new".to_string());
+                    } else if labels.contains(&"TRASH".to_string()) {
+                        message_id_to_action.insert(history.id.unwrap().to_string(), "delete".to_string());
+                    }
+                }
+
+
+
+
+                // println!("history: {:?}", history);
+            } else if history.labels_removed.is_some() {
+                println!("labels_removed");
+
+                // if record was removed Unread label then we move to cur in maildir
+                for label in history.labels_removed.unwrap() {
+                    let labels = label.label_ids.unwrap();
+                    if labels.contains(&"UNREAD".to_string()) {
+                        message_id_to_action.insert(history.id.unwrap().to_string(), "move_to_cur".to_string());
+                    }
+                }
+
+            } else if history.messages_added.is_some() {
+                println!("messages_added");
+                
+                // if record has message added then we need to put in maildir dir based on label
+                // for message in history.messages_added.unwrap() {
+                //     let msg_id = message.id.unwrap();
+                //     println!("msg_id was ADDED: {:?}", msg_id);
+                //     message_id_to_action.insert(msg_id.to_string(), "move_to_new".to_string());
+                // }
+            } 
+
+        
+        }
+            
         // update last sync id
         sync_state.last_sync_id = curr_history_id;
         MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
