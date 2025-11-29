@@ -238,8 +238,50 @@ impl GmailBackend {
         Ok(draft)
     }
 
-    async fn incremental_sync(&self) -> Result<(), Error> {
+    async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
         println!("INCREMENTAL SYNC HAPPENING");
+
+
+        let result = self.hub.as_ref().unwrap()
+            .users()
+            .history_list("me")
+            .start_history_id(last_sync_id)
+            .doit()
+            .await;
+
+
+        if let Err(e) = result {
+            if e.to_string().contains("404") {
+                // means that not enough history is available, so we need to do a smart sync
+                return self.smart_sync().await;
+            } else {
+                return Err(Error::Connection(format!("Failed to fetch history: {}", e)));
+            }
+        }
+
+        let curr_history_id = result.as_ref().unwrap().1.history_id.unwrap();
+
+
+
+        println!("history list result: {:?}", result.as_ref().unwrap().1);
+
+        let sync_state_path = self.maildir_manager.get_sync_state_path();
+        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
+
+                // let result = self.hub.as_ref().unwrap()
+                //     .users()
+                //     .history_list("me")
+                //     .start_history_id(2902946)
+                //     .doit()
+                //     .await
+                //     .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
+                // println!("history list result: {:?}", result.1);
+
+        // update last sync id
+        sync_state.last_sync_id = curr_history_id;
+        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
+
+
         Ok(())
     }
 
@@ -378,10 +420,17 @@ impl GmailBackend {
                 self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
             }
         }
+
+        // Update last_sync_id and sync sate
+        let profile_result = self.hub.as_ref().unwrap()
+            .users()
+            .get_profile("me")
+            .doit()
+            .await
+            .map_err(|e| Error::Connection(format!("Failed to get profile: {}", e)))?;
+        let last_sync_id = profile_result.1.history_id.unwrap();
+        sync_state.last_sync_id = last_sync_id;
         MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
-
-
-        // Update last_sync_id and sync_state
 
         Ok(())
     }
@@ -608,110 +657,8 @@ impl Backend for GmailBackend {
                     self.full_sync().await?;
                     
                 } else {
-                    
-                    let result = self.hub.as_ref().unwrap()
-                        .users()
-                        .history_list("me")
-                        .start_history_id(last_sync_id)
-                        .doit()
-                        .await;
-
-                    match result {
-                        Ok(result) => {
-                            println!("history list result: {:?}", result.1);
-                            self.incremental_sync().await?;
-                        }
-                        Err(e) => {
-                            if e.to_string().contains("404") {
-                                
-                                self.smart_sync().await?;
-                            } else {
-                                return Err(Error::Connection(format!("Failed to fetch history: {}", e)));
-                            }
-                        }
-                    }
-                    
+                    self.incremental_sync(last_sync_id).await?;                    
                 }
-
-                // let last_sync_id = self.maildir_manager.as_ref().unwrap().get_last_sync_id();
-                // println!("last sync id: {:?}", last_sync_id);
-
-                // let profile_result = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .get_profile("me")
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to get profile: {}", e)))?;
-                
-                // let current_history_id = profile_result.1.history_id
-                //     .ok_or_else(|| Error::Connection("No historyId in profile".to_string()))?;
-                
-                // println!("Current history ID: {:?}", current_history_id);
-                
-                // let result = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .history_list("me")
-                //     .start_history_id(2902946)
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
-
-                // println!("history list result: {:?}", result.1);
-// ------
-                // let result = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .messages_list("me")
-                //     .max_results(1)
-                //     // .page_token("03683800523264572113")
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to fetch inbox: {}", e)))?;
-                
-                // let messages: Vec<Message> = result.1.messages.unwrap_or_default();
-                // println!("emails: {:?}", messages);
-                // println!("messages count: {:?}", messages.len());
-
-                // let next_page_token = result.1.next_page_token;
-                // println!("next page token: {:?}", next_page_token);
-
-                // let message_id = messages.first().unwrap().id.clone().unwrap();
-
-                // let message_response = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .messages_get("me", message_id.as_str())
-                //     .format("raw")
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
-                        
-                // let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
-                // println!("message: {:?}", message);
-
-
-                // self.maildir_manager.as_ref().unwrap().save_message(message.1, "cur".to_string()).unwrap();
-// -----------
-
-                // let res = self.maildir_manager.as_ref().unwrap().save_message(messages.first().unwrap().clone(), "cur".to_string());
-                // if res.is_err() {
-                //     return Err(Error::Connection(format!("Failed to save message: {}", res.err().unwrap())));
-                // } else {
-                //     println!("Message saved successfully");
-                // }
-
-                // let message_id = <std::option::Option<std::string::String> as Clone>::clone(&messages.first().unwrap().id).unwrap();
-                // println!("emails: {:?}", messages);
-
-                // let message_response = self.hub.as_ref().unwrap()
-                //     .users()
-                //     .messages_get("me", message_id.as_str())
-                //     .format("minimal")
-                //     .doit()
-                //     .await
-                //     .map_err(|e| Error::Connection(format!("Failed to fetch message_id ({}): {}", message_id, e)));
-                        
-                // let message = message_response.map(|resp| (message_id, resp.1)).unwrap();
-                // println!("message: {:?}", message);
-
 
                 Ok(CommandResult::Empty)
             }

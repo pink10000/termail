@@ -60,7 +60,6 @@ impl MaildirManager {
         Ok(sync_state)
     }
 
-
     pub fn get_last_sync_id(&self) -> u64 {
         self.sync_state.last_sync_id
     }
