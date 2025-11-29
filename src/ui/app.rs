@@ -107,16 +107,9 @@ impl App {
                 }
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
-                    AppEvent::EmailsFetched(emails) => {
-                        self.emails = Some(emails);
-                    },
-                    AppEvent::LabelsFetched(labels) => {
-                        self.labels = Some(labels);
-                    },
-                    AppEvent::CycleViewState => {
-                        self.swap_base_view_state();
-                    }
-                    _ => {}
+                    AppEvent::EmailsFetched(emails) => self.emails = Some(emails),
+                    AppEvent::LabelsFetched(labels) => self.labels = Some(labels),
+                    AppEvent::ChangeViewState(view) => self.state = view,
                 }
             }
         }        
@@ -131,6 +124,9 @@ impl App {
         match self.state {
             ActiveViewState::BaseView(b) => self.handle_key_base_view(key_event, b)?,
             ActiveViewState::MessageView => self.handle_key_message_view(key_event)?,
+            // TODO: if an editor is defined, it should drop us into that editor, 
+            // such that we can write the email there. If the email is done being
+            // written, exiting the program should return back to termail. 
             ActiveViewState::WriteMessageView => self.handle_key_write_view(key_event)?,
         }
         Ok(())
@@ -138,24 +134,17 @@ impl App {
 
     /// Cycles through BaseViewStates: Labels -> Inbox -> Labels
     /// State is preserved when cycling (e.g., selected email index is maintained)
-    fn handle_key_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {        
-        match key_event.code {
-            KeyCode::Esc => self.events.send(AppEvent::Quit),
-            KeyCode::Tab => self.state = match b {
+    fn handle_key_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {
+        match (b, key_event.code) {
+            (_, KeyCode::Esc) => self.events.send(AppEvent::Quit),
+            (_, KeyCode::Tab) => self.state = match b {
                 BaseViewState::Labels => ActiveViewState::BaseView(BaseViewState::Inbox),
                 BaseViewState::Inbox => ActiveViewState::BaseView(BaseViewState::Labels),
             },
             // TODO: Handle scrolling through the labels.
-            KeyCode::Down => {
-                if matches!(b, BaseViewState::Inbox) {
-                    self.select_next_email();
-                }
-            }
-            KeyCode::Up => {
-                if matches!(b, BaseViewState::Inbox) {
-                    self.select_previous_email();
-                }
-            }
+            (BaseViewState::Inbox, KeyCode::Down) => self.hover_next_email(),
+            (BaseViewState::Inbox, KeyCode::Up) => self.hover_previous_email(),
+            (BaseViewState::Inbox, KeyCode::Enter) => self.state = ActiveViewState::MessageView,            
             _ => {}
         }
         Ok(())
@@ -173,6 +162,7 @@ impl App {
         Ok(())
     }
 
+    /// Handles the key events for the write view. 
     fn handle_key_write_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
         match key_event.code {
             KeyCode::Esc => self.return_to_base_view(),
@@ -185,16 +175,12 @@ impl App {
         self.running = false;
     }
 
-    pub fn swap_base_view_state(&mut self) {
-        todo!();
-    }
-
     fn return_to_base_view(&mut self) {
         self.events.send(AppEvent::ChangeViewState(ActiveViewState::BaseView(BaseViewState::Inbox)));
     }
 
-    /// Selects the next email in the list
-    pub fn select_next_email(&mut self) {
+    /// Hovers the next email in the list
+    pub fn hover_next_email(&mut self) {
         if let Some(emails) = &self.emails {
             if emails.is_empty() {
                 return;
@@ -208,8 +194,8 @@ impl App {
         }
     }
 
-    /// Selects the previous email in the list (only works in InboxView)
-    pub fn select_previous_email(&mut self) {
+    /// Hovers the previous email in the list
+    pub fn hover_previous_email(&mut self) {
         if let Some(index) = self.selected_email_index {
             if index > 0 {
                 self.selected_email_index = Some(index - 1);

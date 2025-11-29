@@ -23,7 +23,6 @@ pub enum Event {
 #[derive(Clone, Debug)]
 pub enum AppEvent {
     ChangeViewState(ActiveViewState),
-    CycleViewState,
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
     Quit
