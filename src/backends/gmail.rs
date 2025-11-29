@@ -298,6 +298,7 @@ impl GmailBackend {
         println!("to_update_ids size: {:?}", to_update_ids.len());
 
         // Downlaod new messages
+        println!("Downloading new messages");
         let mut sync_updates_to_add: Vec<(String, String)> = Vec::new();
 
         for id in to_add_ids {
@@ -314,10 +315,10 @@ impl GmailBackend {
                     
                     // Save message to correct maildir subdirectory
                     let maildir_id: String;
-                        if message.1.label_ids.clone().unwrap_or_default().contains(&"READ".to_string()) {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
-                        } else {
+                        if message.1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string()) {
                             maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
+                        } else {
+                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
                         } 
                     
                     // Add to sync updates to add
@@ -331,13 +332,35 @@ impl GmailBackend {
         }
         // update sync state with new messages
         self.update_sync_state(&sync_updates_to_add).unwrap();
-
+        
         // Take care of deleted messages
-        
-        // update sync state with deleted messages
-        
+        // maildir deletes messages based on maildir_id so we need to get the maildir_id from the sync state
+        println!("Deleting deleted messages");
+        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
+        for gmail_id in to_delete_ids {
+            let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
+            self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
+            sync_state.message_id_to_maildir_id.remove(&gmail_id);
+        }
+        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
         
         // Update existing messagse if needed
+        println!("Updating existing messages");
+        // for gmail_id in to_update_ids {
+        //     // if message was updated (read or unread) then we need to update the message in the maildir
+        //     // only get metadata from message and not the body
+        //     let message_response = self.hub.as_ref().unwrap()
+        //         .users()
+        //         .messages_get("me", gmail_id.as_str())
+        //         .format("metadata")
+        //         .doit()
+        //         .await
+        //         .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
+                
+        //      // need to see which directory our message is in and if different from cloud label then we need to move it
+
+        // }
+
 
         // Update last_sync_id and sync_state
 

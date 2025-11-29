@@ -95,6 +95,20 @@ impl MaildirManager {
         Ok(())
     }
 
+    pub fn delete_message(&self, maildir_id: String) -> Result<(), Error> {
+        
+        // delete message from maildir
+        self.maildir.delete(&maildir_id)?;
+        
+        Ok(())
+    }
+
+    // pub fn get_message_directory(&self, maildir_id: String) -> Result<String, Error> {
+    //     let message = self.maildir.find(maildir_id.as_str());
+    //     message.unwrap().is_seen()
+
+    //     Ok(())
+    // }
 
     // save message to maildir
     pub fn save_message(&self, message: &Message, maildir_subdir: String) -> Result<String, Error> {
