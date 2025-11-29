@@ -103,12 +103,44 @@ impl MaildirManager {
         Ok(())
     }
 
-    // pub fn get_message_directory(&self, maildir_id: String) -> Result<String, Error> {
-    //     let message = self.maildir.find(maildir_id.as_str());
-    //     message.unwrap().is_seen()
+    pub fn maildir_move_new_to_cur(&self, maildir_id: &String) -> Result<(), Error> {
+        self.maildir.move_new_to_cur(&maildir_id)?;
+        Ok(())
+    }
 
-    //     Ok(())
-    // }
+    pub fn maildir_move_cur_to_new(&self, maildir_id: &String) -> Result<String, Error> {
+        // find message in cur
+        let mail_entry = self.maildir.find(maildir_id.as_str())
+            .ok_or_else(|| Error::Other(format!("Message not found: {}", maildir_id)))?;
+        
+        let path = mail_entry.path();
+        
+        // Read the raw message content from the file
+        let raw_content = std::fs::read(path)
+            .map_err(|e| Error::Other(format!("Failed to read message: {}", e)))?;
+        
+        // delete message from cur
+        self.maildir.delete(&maildir_id)?;
+        
+        // move message to new
+        let new_maildir_id = self.maildir.store_new(&raw_content)
+            .map_err(|e| Error::Other(format!("Failed to store in new: {}", e)))?;
+        
+        Ok(new_maildir_id)
+    }
+
+    pub fn get_message_directory(&self, maildir_id: &String) -> Result<String, Error> {
+        let mail_entry = self.maildir.find(maildir_id.as_str())
+            .ok_or_else(|| Error::Other(format!("Message not found: {}", maildir_id)))?;
+        let path = mail_entry.path();
+        if path.to_string_lossy().contains("/new/") {
+            Ok("new".to_string())
+        } else if path.to_string_lossy().contains("/cur/") {
+            Ok("cur".to_string())
+        } else {
+            Err(Error::Other(format!("Message path doesn't contain new or cur: {:?}", path)))
+        }
+    }
 
     // save message to maildir
     pub fn save_message(&self, message: &Message, maildir_subdir: String) -> Result<String, Error> {
