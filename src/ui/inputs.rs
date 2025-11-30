@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::ui::{
     event::AppEvent,
     app::{App, ActiveViewState, BaseViewState},
@@ -113,6 +113,23 @@ impl App {
             _ => return Err(Error::Other("Not in compose view".to_string())),
         };
         
+        // Depending on the terminal, some modifiers may not work as intended.
+        // See: https://users.rust-lang.org/t/problem-with-key-events-in-tui/128754
+        // This is dead code, but keeping it here for reference when we debug the issue.
+        if key_event.modifiers.contains(KeyModifiers::SHIFT) {
+            match key_event.code {
+                KeyCode::Enter => {
+                    // TODO: check if the email is valid
+                    println!("Sending email: {:?}", cvs.draft);
+                    self.events.send(AppEvent::SendEmail(cvs.draft.clone()));
+                    self.state = ActiveViewState::BaseView(BaseViewState::Inbox);
+                    // Return early to avoid borrowing `self.state` again. Alternatively,
+                    // we could wrap the match in an else block, but that would be more verbose.
+                    return Ok(())
+                },
+                _ => {}
+            }
+        }
         match (&cvs.current_field, key_event.code) {
             // TODO: A pop up to confirm that the user wants to exit the compose view.
             // Should also be in the config file if the user wants this popup to appear.
@@ -168,6 +185,10 @@ impl App {
 
             // Spawn the editor to write the email body
             (ComposeViewField::Body, KeyCode::Enter) => self.events.send(AppEvent::SpawnEditor),
+            (_, KeyCode::Char('p')) => {
+                self.events.send(AppEvent::SendEmail(cvs.draft.clone()));
+                self.state = ActiveViewState::BaseView(BaseViewState::Inbox);
+            }
             _ => {}
         }
         Ok(())

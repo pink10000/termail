@@ -140,7 +140,27 @@ impl App {
                                 Err(e) => eprintln!("Editor error: {}", e),
                             }
                         }
+                    },
+                    AppEvent::SendEmail(email) => {
+                        let backend = self.backend.lock().await;
+                        let mut plugin_manager = self.plugin_manager.lock().await;
+
+                        let result = backend.do_command(Command::SendEmail {
+                            to: Some(email.to),
+                            subject: Some(email.subject),
+                            body: Some(email.body),
+                        }, Some(&mut plugin_manager)).await?;
+
+                        match result {
+                            CommandResult::Empty => {
+                                // TODO: some kind of status bar / message? maybe use the bottom bar?
+                                println!("Email sent successfully!");
+                            },
+                            _ => return Err(Error::Other("Unexpected command result from send_email".to_string())),
+                            
+                        }
                     }
+                    
                 }
             }
         }        

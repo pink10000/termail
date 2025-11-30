@@ -25,6 +25,7 @@ pub enum AppEvent {
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
     SpawnEditor,
+    SendEmail(EmailMessage),
     Quit
 }
 
