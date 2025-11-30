@@ -9,7 +9,7 @@ use crate::{
     core::email::EmailMessage,
     ui::{
         app::{ActiveViewState, App}, 
-        components::{folder_pane::FolderPane, inbox::Inbox, message_view::MessageView}
+        components::{folder_pane::FolderPane, inbox::Inbox}
     },
 };
 
@@ -135,14 +135,14 @@ impl Widget for &App {
                     state: bv,
                 }.render(middle_layout[1], buf);
             },
-            ActiveViewState::MessageView(mv) => {
+            ActiveViewState::MessageView(messager) => {
                 let email = self.selected_email_index
                     .and_then(|index| self.emails.as_ref()?.get(index))
                     .cloned()
                     .unwrap_or_else(EmailMessage::new);
 
                 self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
-                MessageView { email: &email, scroll: mv.scroll, state: mv }.render(layouts.middle, buf);
+                messager.clone().render(layouts.middle, buf);
             },
             ActiveViewState::ComposeView(composer) => {
                 self.render_top_bar(layouts.top_bar, buf, "Compose Email".to_string());

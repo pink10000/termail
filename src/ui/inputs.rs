@@ -1,8 +1,9 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use crate::ui::{
     event::AppEvent,
-    app::{App, ActiveViewState, BaseViewState, MessageViewState},
+    app::{App, ActiveViewState, BaseViewState},
     components::composer_view::{Composer, ComposeViewField},
+    components::message_view::Messager,
 };
 use crate::core::email::EmailMessage;
 use crate::error::Error;
@@ -69,7 +70,7 @@ impl App {
                     .map(|line| line.chars().count() / term_w as usize + 1) // +1 for the \n
                     .sum::<usize>() as u16;
 
-                self.state = ActiveViewState::MessageView(MessageViewState { scroll: 0, content_height });
+                self.state = ActiveViewState::MessageView(Messager { email: selected_email, scroll: 0, content_height });
             }
             _ => {}
         }

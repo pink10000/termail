@@ -10,7 +10,7 @@ use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
-use crate::ui::components::composer_view::Composer;
+use crate::ui::components::{composer_view::Composer, message_view::Messager};
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -19,20 +19,12 @@ pub enum BaseViewState {
 }
 
 #[derive(Clone, Debug)]
-pub struct MessageViewState {
-    /// Vertical scroll offset (in lines) for the message view
-    pub scroll: u16,
-    /// The height of the Paragraph widget
-    pub content_height: u16,
-}
-
-#[derive(Clone, Debug)]
 pub enum ActiveViewState {
     /// This state holds the base view of the application, which is the sidebar 
     /// with labels, and the inbox view. 
     BaseView(BaseViewState),
     /// This state indicates that the user is viewing a single email message.
-    MessageView(MessageViewState),
+    MessageView(Messager),
     /// This state indicates that the user is writing a new email message.
     ComposeView(Composer),
 }

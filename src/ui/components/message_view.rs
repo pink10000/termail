@@ -5,15 +5,17 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
 use crate::core::email::EmailMessage;
-use crate::ui::app::MessageViewState;
 
-pub struct MessageView<'a> {
-    pub email: &'a EmailMessage,
+#[derive(Clone, Debug)]
+pub struct Messager {
+    pub email: EmailMessage,
+    /// Vertical scroll offset (in lines) for the message view
     pub scroll: u16,
-    pub state: &'a MessageViewState,
+    /// The height of the Paragraph widget
+    pub content_height: u16,
 }
 
-impl<'a> Widget for MessageView<'a> {
+impl Widget for Messager {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let email_from = &self.email.from;
         let email_body = &self.email.body;
