@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::error::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum MimeType {
@@ -88,5 +89,30 @@ impl EmailMessage {
             body: String::new(),
             mime_type: Default::default(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.to.is_empty() && self.subject.is_empty() && self.body.is_empty()
+    }
+
+    pub fn is_partially_empty(&self) -> bool {
+        self.to.is_empty() || self.subject.is_empty() || self.body.is_empty()
+    }
+
+    // fn to_email_content(&self) -> String {
+    //     format!(
+    //         "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
+    //         self.to, self.subject, self.body
+    //     )
+    // }
+
+    pub fn to_lettre_email(&self) -> Result<lettre::Message, Error> {
+        lettre::Message::builder()
+            .from("me@localhost".parse().unwrap()) // Gmail ignores this and uses the authenticated user
+            .to(self.to.parse().unwrap())
+            .subject(self.subject.clone())
+            .header(lettre::message::header::ContentType::TEXT_PLAIN)
+            .body(self.body.clone())
+            .map_err(|e: lettre::error::Error| Error::Other(format!("Failed to build email: {}", e)))
     }
 }

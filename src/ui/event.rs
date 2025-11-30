@@ -1,5 +1,6 @@
 use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
+use tokio::task::JoinHandle;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -23,6 +24,7 @@ pub enum Event {
 pub enum AppEvent {
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
+    SpawnEditor,
     Quit
 }
 
@@ -33,16 +35,39 @@ pub struct EventHandler {
     sender: mpsc::UnboundedSender<Event>,
     /// Event receiver channel.
     receiver: mpsc::UnboundedReceiver<Event>,
+    /// Event loop task handle. Used as a handler to stop the event loop
+    /// task, especially for relinquishing control to the editor.
+    handler: Option<JoinHandle<()>>
 }
 
 impl EventHandler {
     /// Constructs a new instance of [`EventHandler`] and spawns a new thread to handle events.
     pub fn new() -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let actor = EventTask::new(sender.clone());
+        let mut handler = Self {
+            sender,
+            receiver,
+            handler: None
+        };
+        handler.start_events();
+        handler
+    }
+
+    // Spawns event loop task
+    pub fn start_events(&mut self) {
+        if self.handler.is_some() {
+            return;
+        }
+        let actor = EventTask::new(self.sender.clone());
         // Spawn a new thread to handle events in the background by repeatedly ticking.
-        tokio::spawn(async { actor.run().await });
-        Self { sender, receiver }
+        self.handler = Some(tokio::spawn(async { actor.run().await }));
+    }
+
+    /// Kills the event loop task.
+    pub fn stop_events(&mut self) {
+        if let Some(handle) = self.handler.take() {
+            handle.abort();
+        }
     }
 
     pub async fn next(&mut self) -> Result<Event, Error> {

@@ -2,11 +2,9 @@ use super::{Backend, Error};
 use crate::config::BackendConfig;
 use crate::plugins::events::Hook;
 use crate::cli::command::{Command, CommandResult};
-use crate::core::{email::{EmailMessage, EmailSender, MimeType}, label::Label};
+use crate::core::{email::{EmailMessage, EmailSender, MimeType}, label::Label, editor::Editor};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use google_gmail1::{Gmail, hyper_rustls, hyper_util, yup_oauth2, api::Message};
-use tempfile::{NamedTempFile};
 use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use async_trait::async_trait;
 use hyper_rustls::HttpsConnector;
@@ -180,63 +178,6 @@ impl GmailBackend {
         }).collect::<Vec<Label>>();
         
         Ok(output)
-    }
-
-    fn edit_email_with_prefill(editor: &str, mut draft: EmailMessage) -> std::io::Result<EmailMessage> {
-        
-        // Create a new temp file to be used by editor
-        // File gets deleted once out of scope
-        let mut temp_file = NamedTempFile::new()?;
-
-        // Write draft information into temp file
-        writeln!(temp_file, "To: {}", draft.to)?;
-        writeln!(temp_file, "Subject: {}", draft.subject)?;
-        writeln!(temp_file, "Body:\n{}", draft.body)?;
-
-        // Get temp file path        
-        let temp_file_path = temp_file.path().to_owned();
-
-        // Create command to run editor with path as arg
-        let mut command = std::process::Command::new(editor);
-        if editor.contains("code") {
-            // Add wait arg for vscode to ensure file is saved before returning
-            command.arg("--wait").arg(&temp_file_path);
-        }
-        else {
-            command.arg(&temp_file_path);
-        }
-
-        // Run the editor and check if it was successful
-        let status = command.status()?;
-        if !status.success() {
-            eprintln!("Editor failed with status: {:?}", status);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Editor failed",
-            ));
-        }
-
-        // After the user exits the editor, read contents of temp file
-        let contents = std::fs::read_to_string(&temp_file_path)?;
-        let mut in_body = false;
-        let mut body_lines = Vec::new();
-
-        // Iterate through the lines of the file and parse the email fields
-        // Evertyhing after Body: goes into body_lines
-        for line in contents.lines() {
-            if in_body {
-                body_lines.push(line);
-            } else if line.starts_with("To:") {
-                draft.to = line["To:".len()..].trim().to_string();
-            } else if line.starts_with("Subject:") {
-                draft.subject = line["Subject:".len()..].trim().to_string();
-            } else if line.starts_with("Body:") {
-                in_body = true;
-                body_lines.push(line["Body:".len()..].trim());
-            }
-        }
-        draft.body = body_lines.join("\n");
-        Ok(draft)
     }
 
     async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
@@ -660,17 +601,17 @@ impl Backend for GmailBackend {
                 Ok(CommandResult::Labels(labels))
             },
             Command::SendEmail {to,subject, body } => {
-                
-                let mut draft = EmailMessage::new();
-                draft.to = to.unwrap_or_default();
-                draft.subject = subject.unwrap_or_default();
-                draft.body = body.unwrap_or_default();
-
-                let mut draft = if draft.to.is_empty() || draft.subject.is_empty() || draft.body.is_empty() {
-                    Self::edit_email_with_prefill(&self.editor, draft)?
-                } else {
-                    draft
+                let mut draft = EmailMessage {
+                    to: to.unwrap_or_default(),
+                    subject: subject.unwrap_or_default(),
+                    body: body.unwrap_or_default(),
+                    ..EmailMessage::new()
                 };
+
+                if draft.is_partially_empty() {
+                    let result = Editor::open(&self.editor, draft)?;
+                    draft = result;
+                }
 
                 if draft.to.is_empty() {
                     return Err(Error::InvalidInput("To field cannot be empty".to_string()));
@@ -684,17 +625,16 @@ impl Backend for GmailBackend {
                     draft.body = updated_body;
                 }
 
-                let email_content = format!(
-                    "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
-                    draft.to, draft.subject, draft.body
-                );
-
-                let message = Message::default();
+                let email = draft.to_lettre_email()?;
+                let raw_bytes = email.formatted();
 
                 let result = self.hub.as_ref().unwrap()
                     .users()
-                    .messages_send(message, "me")
-                    .upload(std::io::Cursor::new(email_content.as_bytes().to_vec()), "message/rfc822".parse().unwrap())
+                    .messages_send(google_gmail1::api::Message::default(), "me") // See documentation of this method for Gmail's API docs.
+                    .upload(
+                        std::io::Cursor::new(raw_bytes), 
+                        "message/rfc822".parse().unwrap()
+                    )
                     .await
                     .map_err(|e| Error::Connection(format!("Failed to send email: {}", e)))?;
 

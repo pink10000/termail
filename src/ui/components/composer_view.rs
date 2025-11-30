@@ -45,6 +45,16 @@ impl Widget for Composer {
 }
 
 impl Composer {
+    pub fn new(editor_name: String) -> Self {
+        Self {
+            draft: EmailMessage::new(),
+            current_field: ComposeViewField::To,
+            cursor_to: 0,
+            cursor_subject: 0,
+            editor_name,
+        }
+    }
+    
     fn is_selected(&self, target: &ComposeViewField) -> bool {
         self.current_field == *target
     }

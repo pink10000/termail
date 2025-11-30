@@ -33,15 +33,7 @@ impl App {
             (_, KeyCode::Esc) => self.events.send(AppEvent::Quit),
             
             // Handle Compose View
-            (_, KeyCode::Char('c')) | (_, KeyCode::Char('C')) => {
-                self.state = ActiveViewState::ComposeView(Composer {
-                    draft: EmailMessage::new(),
-                    current_field: ComposeViewField::To,
-                    cursor_to: 0,
-                    cursor_subject: 0,
-                    editor_name: self.config.termail.editor.clone(),
-                });
-            },
+            (_, KeyCode::Char('c')) => self.state = ActiveViewState::ComposeView(Composer::new(self.config.termail.editor.clone())),
 
             // Handle View Cycling
             (BaseViewState::Labels, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
@@ -121,58 +113,61 @@ impl App {
             _ => return Err(Error::Other("Not in compose view".to_string())),
         };
         
-        match key_event.code {
+        match (&cvs.current_field, key_event.code) {
             // TODO: A pop up to confirm that the user wants to exit the compose view.
             // Should also be in the config file if the user wants this popup to appear.
-            KeyCode::Esc => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
-            KeyCode::Down => match cvs.current_field {
-                ComposeViewField::To => cvs.current_field = ComposeViewField::Subject,
-                ComposeViewField::Subject => cvs.current_field = ComposeViewField::Body,
-                ComposeViewField::Body => cvs.current_field = ComposeViewField::To,
-            },
-            KeyCode::Up => match cvs.current_field {
-                ComposeViewField::To => cvs.current_field = ComposeViewField::Body,
-                ComposeViewField::Subject => cvs.current_field = ComposeViewField::To,
-                ComposeViewField::Body => cvs.current_field = ComposeViewField::Subject,
-            },
-            KeyCode::Left => match cvs.current_field {
-                ComposeViewField::To => cvs.cursor_to = cvs.cursor_to.saturating_sub(1),
-                ComposeViewField::Subject => cvs.cursor_subject = cvs.cursor_subject.saturating_sub(1),
-                _ => {}
-            },
-            KeyCode::Right => match cvs.current_field {
-                ComposeViewField::To => cvs.cursor_to += if cvs.cursor_to < cvs.draft.to.len() { 1 } else { 0 },
-                ComposeViewField::Subject => cvs.cursor_subject += if cvs.cursor_subject < cvs.draft.subject.len() { 1 } else { 0 },
-                _ => {}
-            },
-            KeyCode::Char(c) => match cvs.current_field {
-                ComposeViewField::To => {
-                    cvs.cursor_to = cvs.cursor_to.min(cvs.draft.to.len());
-                    cvs.draft.to.insert(cvs.cursor_to, c);
+            (_, KeyCode::Esc) => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
+
+            // Cycle through the fields
+            (ComposeViewField::To, KeyCode::Down) => cvs.current_field = ComposeViewField::Subject,
+            (ComposeViewField::Subject, KeyCode::Down) => cvs.current_field = ComposeViewField::Body,
+            (ComposeViewField::Body, KeyCode::Down) => cvs.current_field = ComposeViewField::To,
+            (ComposeViewField::To, KeyCode::Up) => cvs.current_field = ComposeViewField::Body,
+            (ComposeViewField::Subject, KeyCode::Up) => cvs.current_field = ComposeViewField::To,
+            (ComposeViewField::Body, KeyCode::Up) => cvs.current_field = ComposeViewField::Subject,
+
+            // Move the cursor
+            (ComposeViewField::To, KeyCode::Left) => cvs.cursor_to = cvs.cursor_to.saturating_sub(1),
+            (ComposeViewField::Subject, KeyCode::Left) => cvs.cursor_subject = cvs.cursor_subject.saturating_sub(1),
+            (ComposeViewField::To, KeyCode::Right) => {
+                if cvs.cursor_to < cvs.draft.to.len() {
                     cvs.cursor_to += 1;
-                },
-                ComposeViewField::Subject => {
-                    cvs.cursor_subject = cvs.cursor_subject.min(cvs.draft.subject.len());
-                    cvs.draft.subject.insert(cvs.cursor_subject, c);
+                }
+            },
+            (ComposeViewField::Subject, KeyCode::Right) => {
+                if cvs.cursor_subject < cvs.draft.subject.len() {
                     cvs.cursor_subject += 1;
-                },
-                _ => {}
+                }
             },
-            KeyCode::Backspace => match cvs.current_field {
-                ComposeViewField::To => {
-                    if cvs.cursor_to > 0 {
-                        cvs.cursor_to -= 1;
-                        cvs.draft.to.remove(cvs.cursor_to);
-                    }
-                },
-                ComposeViewField::Subject => {
-                    if cvs.cursor_subject > 0 {
-                        cvs.cursor_subject -= 1;
-                        cvs.draft.subject.remove(cvs.cursor_subject);
-                    }
-                },
-                _ => {}
+
+            // Insert a character
+            (ComposeViewField::To, KeyCode::Char(c)) => {
+                cvs.cursor_to = cvs.cursor_to.min(cvs.draft.to.len());
+                cvs.draft.to.insert(cvs.cursor_to, c);
+                cvs.cursor_to += 1;
             },
+            (ComposeViewField::Subject, KeyCode::Char(c)) => {
+                cvs.cursor_subject = cvs.cursor_subject.min(cvs.draft.subject.len());
+                cvs.draft.subject.insert(cvs.cursor_subject, c);
+                cvs.cursor_subject += 1;
+            },
+
+            // Delete a character
+            (ComposeViewField::To, KeyCode::Backspace) => {
+                if cvs.cursor_to > 0 {
+                    cvs.cursor_to -= 1;
+                    cvs.draft.to.remove(cvs.cursor_to);
+                }
+            },
+            (ComposeViewField::Subject, KeyCode::Backspace) => {
+                if cvs.cursor_subject > 0 {
+                    cvs.cursor_subject -= 1;
+                    cvs.draft.subject.remove(cvs.cursor_subject);
+                }
+            },
+
+            // Spawn the editor to write the email body
+            (ComposeViewField::Body, KeyCode::Enter) => self.events.send(AppEvent::SpawnEditor),
             _ => {}
         }
         Ok(())

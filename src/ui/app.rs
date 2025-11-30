@@ -1,16 +1,22 @@
 // This file contains the application logic for the termail UI.
 
+use crossterm::{
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    execute,
+};
 use ratatui::DefaultTerminal;
 use crate::cli::command::{Command, CommandResult};
-use crate::core::{email::EmailMessage, label::Label};
-use crate::ui::event::{AppEvent, Event, EventHandler};
+use crate::core::{email::EmailMessage, label::Label, editor::Editor};
+use crate::ui::{
+    event::{AppEvent, Event, EventHandler},
+    components::{composer_view::Composer, message_view::Messager},
+};
 use crate::config::Config;
 use crate::error::Error;
 use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
-use crate::ui::components::{composer_view::Composer, message_view::Messager};
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -107,6 +113,34 @@ impl App {
                     AppEvent::Quit => self.quit(),
                     AppEvent::EmailsFetched(emails) => self.emails = Some(emails),
                     AppEvent::LabelsFetched(labels) => self.labels = Some(labels),
+                    AppEvent::SpawnEditor => {
+                        if let ActiveViewState::ComposeView(composer) = &mut self.state {
+                            let editor_cmd = self.config.termail.editor.clone();
+                            let current_draft = composer.draft.clone();
+
+                            // 1. Stop event polling
+                            self.events.stop_events();
+
+                            // 2. Suspend TUI
+                            let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+                            let _ = disable_raw_mode();
+
+                            // 3. Run editor
+                            let result = Editor::open(&editor_cmd, current_draft);
+
+                            // 4. Restore TUI
+                            let _ = enable_raw_mode();
+                            let _ = execute!(std::io::stdout(), EnterAlternateScreen);
+                            terminal.clear()?;
+                            self.events.start_events();
+
+                            // 5. Update state
+                            match result {
+                                Ok(new_draft) => composer.draft = new_draft,
+                                Err(e) => eprintln!("Editor error: {}", e),
+                            }
+                        }
+                    }
                 }
             }
         }        
