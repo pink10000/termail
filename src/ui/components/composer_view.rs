@@ -19,18 +19,7 @@ impl<'a> Widget for Composer<'a> {
     /// two of these fields (extensible, to add CC and BCC fields).
     /// 
     /// The body is a vertical layout with text from the temporary file.
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let selected_field = &self.state.current_field;
-
-        // This captures 'selected_field' so we don't have to pass it every time
-        let get_style = |target: ComposeViewField| -> Style {
-            if *selected_field == target {
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            }
-        };
-
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -39,19 +28,27 @@ impl<'a> Widget for Composer<'a> {
             ])
             .split(area);
 
-        self.render_header(main_layout[0], buf, &get_style);
-        self.render_body(main_layout[1], buf, get_style(ComposeViewField::Body));
+        self.render_header(main_layout[0], buf);
+        self.render_body(main_layout[1], buf);
     }
 }
 
 impl<'a> Composer<'a> {
+    fn is_selected(&self, target: &ComposeViewField) -> bool {
+        self.state.current_field == *target
+    }
+
+    /// Returns the style for the selected field.
+    fn get_selection_style(&self, target: &ComposeViewField) -> Style {
+        if self.is_selected(target) {
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        }
+    }
+
     /// Renders the header section containing To and Subject fields.
-    fn render_header(
-        &self,
-        area: Rect, 
-        buf: &mut Buffer, 
-        get_style: &impl Fn(ComposeViewField) -> Style
-    ) {
+    fn render_header(&mut self,area: Rect, buf: &mut Buffer) {
         let header_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -72,14 +69,32 @@ impl<'a> Composer<'a> {
         
         header_block.render(area, buf);
         
-        self.render_row(header_layout[0], buf, "To:", &self.state.draft.to, get_style(ComposeViewField::To));
-        self.render_row(header_layout[1], buf, "Subject:", &self.state.draft.subject, get_style(ComposeViewField::Subject));
+        self.render_row(
+            header_layout[0], 
+            buf, 
+            "To:", &self.state.draft.to, 
+            ComposeViewField::To
+        );
+        self.render_row(header_layout[1], 
+            buf, 
+            "Subject:", &self.state.draft.subject, 
+            ComposeViewField::Subject
+        );
     }
 
     /// Renders a single field row with label and input value.
     /// 
     /// The row is split into a label area and an input area.
-    fn render_row(&self, area: Rect, buf: &mut Buffer, label: &str, value: &str, style: Style) {
+    fn render_row(
+        &mut self, 
+        area: Rect, 
+        buf: &mut Buffer, 
+        label: &str, 
+        value: &str, 
+        field_repr: ComposeViewField,
+    ) {
+        let style = self.get_selection_style(&field_repr);
+
         // Split row into [Label, Input]
         let row_layout = Layout::default()
             .direction(Direction::Horizontal)
@@ -89,20 +104,27 @@ impl<'a> Composer<'a> {
         let label_area = row_layout[0];
         let input_area = row_layout[1];
 
+        // Add borders so it looks like a proper input field
+        let input_block = Block::default().style(style);
+
+        let visible_len = row_layout[1].width.saturating_sub(2).max(20) as usize;
+        let display_value = format!("[{:_<width$.prec$}]", value, width = visible_len, prec = visible_len);
+
         Paragraph::new(label)
             .alignment(Alignment::Right)
             .style(style)
             .render(label_area, buf);
-
-        Paragraph::new(value)
+       
+        Paragraph::new(display_value)
             .alignment(Alignment::Left)
+            .block(input_block)
             .render(input_area, buf);
     }
 
     /// Renders the body section of the compose view.
     /// 
     /// Shows either placeholder text or the actual email body content.
-    fn render_body(&self, area: Rect, buf: &mut Buffer, style: Style) {
+    fn render_body(&self, area: Rect, buf: &mut Buffer) {
         // Determine body content based on state
         let content = match (self.state.draft.body.is_empty(), &self.state.current_field) {
             (true, ComposeViewField::Body) => {
@@ -112,12 +134,11 @@ impl<'a> Composer<'a> {
             (false, _) => self.state.draft.body.clone(),
         };
 
-        // Determine border style based on whether body field is selected
         let body_block = Block::default()
             .title("Body")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(style);
+            .border_style(self.get_selection_style(&ComposeViewField::Body));
 
         Paragraph::new(content)
             .block(body_block)

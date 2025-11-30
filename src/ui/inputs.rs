@@ -73,7 +73,7 @@ impl App {
     }
 
     /// Hovers the next email in the list
-    pub fn hover_next_email(&mut self) {
+    fn hover_next_email(&mut self) {
         if let Some(emails) = &self.emails {
             if emails.is_empty() {
                 return;
@@ -88,7 +88,7 @@ impl App {
     }
 
     /// Hovers the previous email in the list
-    pub fn hover_previous_email(&mut self) {
+    fn hover_previous_email(&mut self) {
         if let Some(index) = self.selected_email_index {
             if index > 0 {
                 self.selected_email_index = Some(index - 1);
@@ -129,6 +129,18 @@ impl App {
                 ComposeViewField::Subject => cvs.current_field = ComposeViewField::To,
                 ComposeViewField::Body => cvs.current_field = ComposeViewField::Subject,
             },
+            KeyCode::Char(c) => match cvs.current_field {
+                ComposeViewField::To => { 
+                    cvs.draft.to.push(c);
+                },
+                ComposeViewField::Subject => cvs.draft.subject.push(c),
+                _ => {},
+            },
+            KeyCode::Backspace => match cvs.current_field {
+                ComposeViewField::To => { cvs.draft.to.pop(); },
+                ComposeViewField::Subject => { cvs.draft.subject.pop(); },
+                _ => {}
+            }
             _ => {}
         }
         Ok(())
