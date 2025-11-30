@@ -1,7 +1,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use crate::ui::{
     event::AppEvent,
-    app::{App, ActiveViewState, BaseViewState, ComposeViewState, ComposeViewField, MessageViewState},
+    app::{App, ActiveViewState, BaseViewState, MessageViewState},
+    components::composer_view::{Composer, ComposeViewField},
 };
 use crate::core::email::EmailMessage;
 use crate::error::Error;
@@ -32,9 +33,12 @@ impl App {
             
             // Handle Compose View
             (_, KeyCode::Char('c')) | (_, KeyCode::Char('C')) => {
-                self.state = ActiveViewState::ComposeView(ComposeViewState {
+                self.state = ActiveViewState::ComposeView(Composer {
                     draft: EmailMessage::new(),
                     current_field: ComposeViewField::To,
+                    cursor_to: 0,
+                    cursor_subject: 0,
+                    editor_name: self.config.termail.editor.clone(),
                 });
             },
 
@@ -115,6 +119,7 @@ impl App {
             ActiveViewState::ComposeView(cvs) => cvs,
             _ => return Err(Error::Other("Not in compose view".to_string())),
         };
+        
         match key_event.code {
             // TODO: A pop up to confirm that the user wants to exit the compose view.
             // Should also be in the config file if the user wants this popup to appear.
@@ -129,18 +134,44 @@ impl App {
                 ComposeViewField::Subject => cvs.current_field = ComposeViewField::To,
                 ComposeViewField::Body => cvs.current_field = ComposeViewField::Subject,
             },
+            KeyCode::Left => match cvs.current_field {
+                ComposeViewField::To => cvs.cursor_to = cvs.cursor_to.saturating_sub(1),
+                ComposeViewField::Subject => cvs.cursor_subject = cvs.cursor_subject.saturating_sub(1),
+                _ => {}
+            },
+            KeyCode::Right => match cvs.current_field {
+                ComposeViewField::To => cvs.cursor_to += if cvs.cursor_to < cvs.draft.to.len() { 1 } else { 0 },
+                ComposeViewField::Subject => cvs.cursor_subject += if cvs.cursor_subject < cvs.draft.subject.len() { 1 } else { 0 },
+                _ => {}
+            },
             KeyCode::Char(c) => match cvs.current_field {
-                ComposeViewField::To => { 
-                    cvs.draft.to.push(c);
+                ComposeViewField::To => {
+                    cvs.cursor_to = cvs.cursor_to.min(cvs.draft.to.len());
+                    cvs.draft.to.insert(cvs.cursor_to, c);
+                    cvs.cursor_to += 1;
                 },
-                ComposeViewField::Subject => cvs.draft.subject.push(c),
-                _ => {},
+                ComposeViewField::Subject => {
+                    cvs.cursor_subject = cvs.cursor_subject.min(cvs.draft.subject.len());
+                    cvs.draft.subject.insert(cvs.cursor_subject, c);
+                    cvs.cursor_subject += 1;
+                },
+                _ => {}
             },
             KeyCode::Backspace => match cvs.current_field {
-                ComposeViewField::To => { cvs.draft.to.pop(); },
-                ComposeViewField::Subject => { cvs.draft.subject.pop(); },
+                ComposeViewField::To => {
+                    if cvs.cursor_to > 0 {
+                        cvs.cursor_to -= 1;
+                        cvs.draft.to.remove(cvs.cursor_to);
+                    }
+                },
+                ComposeViewField::Subject => {
+                    if cvs.cursor_subject > 0 {
+                        cvs.cursor_subject -= 1;
+                        cvs.draft.subject.remove(cvs.cursor_subject);
+                    }
+                },
                 _ => {}
-            }
+            },
             _ => {}
         }
         Ok(())

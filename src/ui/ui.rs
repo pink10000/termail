@@ -7,8 +7,10 @@ use ratatui::{
 
 use crate::{
     core::email::EmailMessage,
-    ui::app::{ActiveViewState, App},
-    ui::components::{composer_view::Composer, folder_pane::FolderPane, inbox::Inbox, message_view::MessageView},
+    ui::{
+        app::{ActiveViewState, App}, 
+        components::{folder_pane::FolderPane, inbox::Inbox, message_view::MessageView}
+    },
 };
 
 /// Layout structure containing all UI component rectangles
@@ -142,12 +144,9 @@ impl Widget for &App {
                 self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
                 MessageView { email: &email, scroll: mv.scroll, state: mv }.render(layouts.middle, buf);
             },
-            ActiveViewState::ComposeView(compose_state) => {
+            ActiveViewState::ComposeView(composer) => {
                 self.render_top_bar(layouts.top_bar, buf, "Compose Email".to_string());
-                Composer {
-                    state: compose_state,
-                    editor_name: &self.config.termail.editor,
-                }.render(layouts.middle, buf);
+                composer.clone().render(layouts.middle, buf);
             },
         }
     }

@@ -10,6 +10,7 @@ use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
+use crate::ui::components::composer_view::Composer;
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -25,21 +26,6 @@ pub struct MessageViewState {
     pub content_height: u16,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ComposeViewField {
-    To,
-    Subject,
-    Body,
-}
-
-#[derive(Clone, Debug)]
-pub struct ComposeViewState {
-    /// The draft email being composed
-    pub draft: EmailMessage,
-    /// Current field being edited
-    pub current_field: ComposeViewField,
-}
-
 #[derive(Clone, Debug)]
 pub enum ActiveViewState {
     /// This state holds the base view of the application, which is the sidebar 
@@ -48,7 +34,7 @@ pub enum ActiveViewState {
     /// This state indicates that the user is viewing a single email message.
     MessageView(MessageViewState),
     /// This state indicates that the user is writing a new email message.
-    ComposeView(ComposeViewState),
+    ComposeView(Composer),
 }
 
 pub struct App {
