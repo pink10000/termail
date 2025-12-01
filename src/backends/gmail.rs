@@ -232,61 +232,85 @@ impl GmailBackend {
             .await
             .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
 
-        // println!("history records: {:?}", history_records.1);
         if history_records.1.history.is_none() {
-            return Err(Error::Connection("No history records found".to_string()));
+            println!("No history records found");
+            return Ok(());
         }
 
         // create a map of message id to action that was taken and we overwrite if there are multiple actions for the same message since records are in chronological order
-        // TODO store msg id instaed of history id in map
         let mut message_id_to_action: HashMap<String, String> = HashMap::new();
 
 
-        for history in history_records.1.history.unwrap() {
-            // only print a record if it has abels_added: None
-            if history.labels_added.is_some() {
-                println!("labels_added");
+        for history_record in history_records.1.history.unwrap() {
+            if history_record.labels_added.is_some() {
 
                 // if record was added Trash label then we delete from maildir
                 // if record was added Unread label then we move to new in maildir
-                for label in history.labels_added.unwrap() {
+                for label in history_record.labels_added.unwrap() {
 
                     let labels = label.label_ids.unwrap();
 
                     if labels.contains(&"UNREAD".to_string()) {
-                        message_id_to_action.insert(history.id.unwrap().to_string(), "move_to_new".to_string());
+
+                        let gmail_id = label.message.unwrap().id.unwrap();
+                        message_id_to_action.insert(gmail_id.to_string(), "move_to_new".to_string());
                     } else if labels.contains(&"TRASH".to_string()) {
-                        message_id_to_action.insert(history.id.unwrap().to_string(), "delete".to_string());
+                        
+                        let gmail_id = label.message.unwrap().id.unwrap();
+                        message_id_to_action.insert(gmail_id.to_string(), "delete".to_string());
                     }
                 }
-
-
-
-
-                // println!("history: {:?}", history);
-            } else if history.labels_removed.is_some() {
-                println!("labels_removed");
+            } else if history_record.labels_removed.is_some() {
 
                 // if record was removed Unread label then we move to cur in maildir
-                for label in history.labels_removed.unwrap() {
+                for label in history_record.labels_removed.unwrap() {
                     let labels = label.label_ids.unwrap();
                     if labels.contains(&"UNREAD".to_string()) {
-                        message_id_to_action.insert(history.id.unwrap().to_string(), "move_to_cur".to_string());
+                        
+                        let gmail_id = label.message.unwrap().id.unwrap();
+                        message_id_to_action.insert(gmail_id.to_string(), "move_to_cur".to_string());
                     }
                 }
 
-            } else if history.messages_added.is_some() {
-                println!("messages_added");
                 
+
+            } else if history_record.messages_added.is_some() {
                 // if record has message added then we need to put in maildir dir based on label
-                // for message in history.messages_added.unwrap() {
-                //     let msg_id = message.id.unwrap();
-                //     println!("msg_id was ADDED: {:?}", msg_id);
-                //     message_id_to_action.insert(msg_id.to_string(), "move_to_new".to_string());
-                // }
+                for message in history_record.messages_added.unwrap() {
+                    let gmail_id = message.message.unwrap().id.unwrap();
+                    message_id_to_action.insert(gmail_id.to_string(), "move_to_new".to_string());
+                }
             } 
 
         
+        }
+
+
+        println!("message_id_to_action: {:?}", message_id_to_action);
+
+        // do the right thing based on the action
+        for (message_id, action) in message_id_to_action.iter() {
+            if action == "delete" {
+                // get maildir id from map
+                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
+                // delete message from maildir using maildir_id
+                self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
+                // update sync state by removing message_id from map
+                sync_state.message_id_to_maildir_id.remove(message_id);
+            } else if action == "move_to_new" {
+                // get maildir id from map
+                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
+                // move message to new in maildir
+                self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+            } else if action == "move_to_cur" {
+                // get maildir id from map
+                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
+                // move message to cur in maildir
+                let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
+                // update sync state by removing message_id from map and adding new maildir_id
+                sync_state.message_id_to_maildir_id.remove(message_id);
+                sync_state.message_id_to_maildir_id.insert(message_id.clone(), new_maildir_id);
+            }
         }
             
         // update last sync id

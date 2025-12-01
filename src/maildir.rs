@@ -109,6 +109,8 @@ impl MaildirManager {
         Ok(())
     }
 
+    // since this function deletes the message from cur, we need to return the new maildir_id
+    // so that the calling function can update the sync state with the new maildir_id
     pub fn maildir_move_cur_to_new(&self, maildir_id: &String) -> Result<String, Error> {
         // find message in cur
         let mail_entry = self.maildir.find(maildir_id.as_str())
