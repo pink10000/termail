@@ -75,7 +75,7 @@ When running in TUI mode (default), the following keys are available:
 | Inbox         | `Enter`      | Open selected email                     |
 | Message View  | `Down / Up`  | Scroll message content                  |
 | Compose       | `Down / Up`  | Cycle fields (To, Subject, Body)        |
-
+| Sync/Refresh  | `r`          | Sync form cloud                         |
 ## CLI Commands
 You can execute commands directly without entering the TUI by passing the --cli flag.
 
