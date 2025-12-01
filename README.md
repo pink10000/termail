@@ -96,6 +96,11 @@ Sync with Cloud: Performs synchronization between the configured backend and the
 cargo run -- --cli sync-from-cloud
 ```
 
+View downloaded messages in TUI
+```bash
+cargo run --  --backend Gmail view-mailbox
+```
+
 Null: 
 ```bash 
 cargo run -- --cli null
