@@ -1,11 +1,13 @@
 use google_gmail1::api::Message;
 use crate::error::Error;
+use crate::core::email::{EmailMessage, EmailSender, MimeType};
 use maildir::Maildir;
 use std::path::Path;
 use std::collections::HashMap;
 use serde::Serialize;
 use serde::Deserialize;
 use std::path::PathBuf;
+use mailparse::*;
 
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -156,6 +158,134 @@ impl MaildirManager {
         } else {
             return Err(Error::Other(format!("Invalid maildir subdirectory: {}", maildir_subdir)));
         }
+    }
+
+    /// parse an RFC822 email format into an EmailMessage struct using mailparse crate
+    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {
+        
+        // use mailparse to parse the email
+        let parsed = parse_mail(raw_content)
+            .map_err(|e| Error::Other(format!("Failed to parse email: {}", e)))?;
+
+        let mut email = EmailMessage::new();
+        email.id = maildir_id; // TODO we want the gmail ID here not maildir id
+        // fine rn since we are not doing any actions from the TUI that we want to sync up
+
+        // extract headers using mailparse (automatically decodes MIME encoded-words)
+        if let Some(subject) = parsed.headers.get_first_value("Subject") {
+            email.subject = subject;
+        }
+
+        if let Some(from) = parsed.headers.get_first_value("From") {
+            email.from = EmailSender::from(from);
+        }
+
+        if let Some(to) = parsed.headers.get_first_value("To") {
+            email.to = to;
+        }
+
+        if let Some(date) = parsed.headers.get_first_value("Date") {
+            email.date = date;
+        }
+
+        // extract body and mime type from parts
+        let (body, mime_type) = if !parsed.subparts.is_empty() {
+            let mut body = String::new();
+            let mut mime_type = Default::default();
+            
+            for part in &parsed.subparts {
+                if let Ok(text) = part.get_body()
+                {
+                    body.push_str(&text);
+                }
+
+                if let Some(part_mime) = &part.headers.get_first_header("Content-Type") {
+                    let part_mime = part_mime.get_value().to_lowercase();
+                    if part_mime.contains("html") {
+                        mime_type = MimeType::TextHtml;
+                    }
+                }
+            }
+            
+            (body, mime_type)
+        } else {
+            // fallback
+            let body = parsed.get_body()
+                .unwrap_or_else(|_| String::new());
+            (body, MimeType::TextPlain)
+        };
+
+        email.body = body;
+        email.mime_type = mime_type;
+
+        Ok(email)
+    }
+
+    // list all emails from maildir (both new and cur directories)
+    pub fn list_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
+        let mut emails = Vec::new();
+        let maildir_path = self.maildir.path();
+
+        // collect entries from both new and cur directories
+        let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
+
+        // read from "new" directory (unread messages)
+        let new_dir = maildir_path.join("new");
+        if new_dir.exists() {
+            
+            let new_entries = std::fs::read_dir(&new_dir)
+                .map_err(|e| Error::Other(format!("Failed to read new directory: {}", e)))?;
+
+            for entry in new_entries {
+                let entry = entry.map_err(|e| Error::Other(format!("Failed to read directory entry: {}", e)))?;
+                let path = entry.path();
+                if path.is_file() {
+                    let filename = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    entries.push((filename, path));
+                }
+            }
+        }
+
+        // read from "cur" directory (read messages)
+        let cur_dir = maildir_path.join("cur");
+        if cur_dir.exists() {
+
+            let cur_entries = std::fs::read_dir(&cur_dir)
+                .map_err(|e| Error::Other(format!("Failed to read cur directory: {}", e)))?;
+
+            for entry in cur_entries {
+                let entry = entry.map_err(|e| Error::Other(format!("Failed to read directory entry: {}", e)))?;
+                let path = entry.path();
+                if path.is_file() {
+                    let filename = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    entries.push((filename, path));
+                }
+            }
+        }
+
+        // sort by filename (which contains timestamp) - oldest first (reverse order)
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // take only the requested count
+        for (maildir_id, path) in entries.into_iter().take(count) {
+            // If we want to do actions from the TUI (delete, mark as read, archive, add label) then we will need to transalte maildir_id -> gmail_id
+            let maildir_id_clone = maildir_id.clone();
+            let raw_content = std::fs::read(&path)
+                .map_err(|e| Error::Other(format!("Failed to read maildir entry {}: {}", maildir_id_clone, e)))?;
+
+            match self.parse_rfc822_email(&raw_content, maildir_id) {
+                Ok(email) => emails.push(email),
+                Err(e) => eprintln!("Failed to parse email: {}", e),
+            }
+        }
+
+        Ok(emails)
     }
     
 }

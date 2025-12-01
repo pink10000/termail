@@ -203,10 +203,11 @@ impl App {
         count: usize,
     ) {
         tokio::spawn(async move {
-            // Acquire lock and fetch emails (no plugin manager needed for basic fetch)
+            // Acquire lock and fetch emails from maildir (no plugin manager needed for basic fetch)
             let result = {
                 let backend_guard = backend.lock().await;
-                backend_guard.do_command(Command::FetchInbox { count }, None).await
+                backend_guard.do_command(Command::ViewMailbox { count }, None).await
+                // backend_guard.do_command(Command::FetchInbox { count }, None).await
             };
             
             match result {
@@ -223,7 +224,7 @@ impl App {
                     eprintln!("Failed to fetch emails: {}", e);
                 }
                 _ => {
-                    eprintln!("Unexpected command result from fetch_inbox");
+                    eprintln!("Unexpected command result from view_mailbox");
                 }
             }
         });

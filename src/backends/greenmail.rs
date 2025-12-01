@@ -252,6 +252,12 @@ impl Backend for GreenmailBackend {
 
                 Ok(CommandResult::Empty)
             }
+            Command::ViewMailbox { count } => {
+
+                println!("view mailbox called, count: {:?}", count);
+
+                Ok(CommandResult::Empty)
+            }
             Command::Null => Ok(CommandResult::Empty)
         }
     }

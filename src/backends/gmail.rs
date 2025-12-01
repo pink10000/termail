@@ -143,6 +143,21 @@ impl GmailBackend {
         Ok(emails)
     }
 
+    /// Views emails from the local maildir (reads from synced emails).
+    /// 
+    /// Emails are read from the maildir directory where they were synced from Gmail.
+    async fn view_mailbox(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
+        // Read emails from maildir
+        let emails = self.maildir_manager.list_emails(count)?;
+        
+        if emails.is_empty() {
+            println!("No Messages Found");
+            return Ok(Vec::new());
+        }
+        
+        Ok(emails)
+    }
+
     async fn list_labels(&self) -> Result<Vec<Label>, Error> {
         let result = self.hub.as_ref().unwrap()
             .users()
@@ -590,6 +605,14 @@ impl Backend for GmailBackend {
                     Ok(CommandResult::Emails(emails))
                 }
             },
+            // TODO: deprecate fetch inbox for gmail backend
+            // - Breaks the sync model
+            // - Risks rate limiting
+            // - Doesn't persist emails
+            // - Duplicates functionality
+            // Command::FetchInbox { count: _ } => {
+            //     return Err(Error::Other("FetchInbox is deprecated for Gmail backend. Use 'sync-from-cloud' to download emails to maildir, then 'view-mailbox' to view them.".to_string()));
+            // },
             Command::ListLabels => {
                 let mut labels = self.list_labels().await.unwrap();
                 if let Some(filter_labels) = self.filter_labels.as_ref() {
@@ -657,7 +680,18 @@ impl Backend for GmailBackend {
                 }
 
                 Ok(CommandResult::Empty)
-            }
+            },
+            Command::ViewMailbox { count } => {
+                let emails = self.view_mailbox(count).await.unwrap();
+                println!("emails count: {:?}", emails.len());
+                if emails.is_empty() {
+                    Ok(CommandResult::Empty)
+                } else if count == 1 {
+                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
+                } else {
+                    Ok(CommandResult::Emails(emails))
+                }
+            },
             Command::Null => Ok(CommandResult::Empty)
         }
     }

@@ -28,6 +28,13 @@ pub enum Command {
 
     SyncFromCloud,
 
+    /// View emails from local maildir
+    ViewMailbox {
+        /// Number of emails to view (default: 1)
+        #[arg(default_value_t = 1)]
+        count: usize,
+    },
+
     /// Null command (used for testing plugins))
     Null
 }
