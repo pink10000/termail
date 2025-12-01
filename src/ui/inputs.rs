@@ -31,6 +31,8 @@ impl App {
     fn handle_base_view(&mut self, key_event: KeyEvent, b: BaseViewState) -> Result<(), Error> {
         match (b, key_event.code) {
             (_, KeyCode::Esc) => self.events.send(AppEvent::Quit),
+            // Sync from cloud (refresh local maildir from backend)
+            (_, KeyCode::Char('r')) => self.events.send(AppEvent::SyncFromCloud),
             
             // Handle Compose View
             (_, KeyCode::Char('c')) => self.state = ActiveViewState::ComposeView(Composer::new(self.config.termail.editor.clone())),

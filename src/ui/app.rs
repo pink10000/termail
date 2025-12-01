@@ -160,7 +160,14 @@ impl App {
                             
                         }
                     }
-                    
+                    AppEvent::SyncFromCloud => {
+                        // same here can add status bar to show sync progress
+                        Self::spawn_sync_from_cloud(
+                            Arc::clone(&self.backend),
+                            self.events.get_sender(),
+                            self.config.termail.email_fetch_count,
+                        );
+                    }
                 }
             }
         }        
@@ -188,6 +195,56 @@ impl App {
                 self.config.termail.email_fetch_count,
             );
         }
+    }
+
+    /// Spawns an async task to sync emails from the cloud backend into the local maildir
+    /// and then refresh the mailbox view.
+    fn spawn_sync_from_cloud(
+        backend: Arc<Mutex<Box<dyn Backend>>>,
+        sender: tokio::sync::mpsc::UnboundedSender<Event>,
+        count: usize,
+    ) {
+        tokio::spawn(async move {
+            // start by syncing from cloud
+            let sync_result = {
+                let backend_guard = backend.lock().await;
+                backend_guard.do_command(Command::SyncFromCloud, None)
+                    .await
+            };
+
+            let result = match sync_result {
+                Ok(_) => {
+                    // after sync finishes, refresh the mailbox with view_mailbox
+                    let backend_guard = backend.lock().await;
+                    backend_guard
+                        .do_command(Command::ViewMailbox { count }, None)
+                        .await
+                }
+                Err(e) => {
+                    eprintln!("Failed to sync from cloud: {}", e);
+                    // bail out of this async task, return right away without refreshing the mailbox
+                    return;
+                }
+            };
+
+            match result {
+                Ok(CommandResult::Emails(emails)) => {
+                    let _ = sender.send(Event::App(AppEvent::EmailsFetched(emails)));
+                }
+                Ok(CommandResult::Email(email)) => {
+                    let _ = sender.send(Event::App(AppEvent::EmailsFetched(vec![email])));
+                }
+                Ok(CommandResult::Empty) => {
+                    let _ = sender.send(Event::App(AppEvent::EmailsFetched(vec![])));
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch emails: {}", e);
+                }
+                _ => {
+                    eprintln!("Unexpected command result from view_mailbox");
+                }
+            }
+        });
     }
 
     /// Spawns an async task to fetch emails from the backend.

@@ -26,7 +26,8 @@ pub enum AppEvent {
     LabelsFetched(Vec<Label>),
     SpawnEditor,
     SendEmail(EmailMessage),
-    Quit
+    SyncFromCloud,
+    Quit,
 }
 
 /// Terminal event handler.

@@ -51,7 +51,6 @@ impl GmailBackend {
         let messages: Vec<Message> = result.1.messages.unwrap_or_default();
 
         if messages.is_empty() {
-            println!("No Messages Found");
             return Ok(Vec::new())
         }
         
@@ -151,7 +150,6 @@ impl GmailBackend {
         let emails = self.maildir_manager.list_emails(count)?;
         
         if emails.is_empty() {
-            println!("No Messages Found");
             return Ok(Vec::new());
         }
         
@@ -196,8 +194,6 @@ impl GmailBackend {
     }
 
     async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
-        println!("INCREMENTAL SYNC HAPPENING");
-
 
         let result = self.hub.as_ref().unwrap()
             .users()
@@ -233,7 +229,6 @@ impl GmailBackend {
             .map_err(|e| Error::Connection(format!("Failed to fetch history: {}", e)))?;
 
         if history_records.1.history.is_none() {
-            println!("No history records found");
             return Ok(());
         }
 
@@ -285,9 +280,6 @@ impl GmailBackend {
         
         }
 
-
-        println!("message_id_to_action: {:?}", message_id_to_action);
-
         // do the right thing based on the action
         for (message_id, action) in message_id_to_action.iter() {
             if action == "delete" {
@@ -322,7 +314,6 @@ impl GmailBackend {
     }
 
     async fn smart_sync(&self) -> Result<(), Error> {
-        println!("SMART SYNC HAPPENING");
 
         // Get all current gmail message ids
         let mut all_gmail_ids: HashSet<String> = HashSet::new();
@@ -371,12 +362,11 @@ impl GmailBackend {
         let to_delete_ids = &local_ids - &all_gmail_ids;
         let to_update_ids = &all_gmail_ids & &local_ids;
 
-        println!("to_add_ids size: {:?}", to_add_ids.len());
-        println!("to_delete_ids size: {:?}", to_delete_ids.len());
-        println!("to_update_ids size: {:?}", to_update_ids.len());
+        // println!("to_add_ids size: {:?}", to_add_ids.len());
+        // println!("to_delete_ids size: {:?}", to_delete_ids.len());
+        // println!("to_update_ids size: {:?}", to_update_ids.len());
 
         // Downlaod new messages
-        println!("Downloading new messages");
         let mut sync_updates_to_add: Vec<(String, String)> = Vec::new();
 
         for id in to_add_ids {
@@ -413,7 +403,6 @@ impl GmailBackend {
         
         // Take care of deleted messages
         // maildir deletes messages based on maildir_id so we need to get the maildir_id from the sync state
-        println!("Deleting deleted messages");
         let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
         for gmail_id in to_delete_ids {
             let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
@@ -423,7 +412,6 @@ impl GmailBackend {
         MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
         
         // Update existing messagse if needed
-        println!("Updating existing messages");
         let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
 
         for gmail_id in to_update_ids {
@@ -472,10 +460,8 @@ impl GmailBackend {
     }
 
     async fn full_sync(&self) -> Result<(), Error> {
-        println!("FULL SYNC HAPPENING");
         // TODO: can later get progress to show easily later
         let mut page_token: Option<String> = None;
-        let mut num_emails = 0;
 
         let mut updates = Vec::new();
 
@@ -527,9 +513,6 @@ impl GmailBackend {
                         
                         updates.push((message.1.id.unwrap().clone(), maildir_id));
 
-                        println!("Number of emails saved: {:?}", num_emails);
-                        num_emails += 1;
-
                     }
                     Err(e) => {
                         return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
@@ -546,13 +529,10 @@ impl GmailBackend {
             }
         }
 
-        println!("Total emails fetched: {:?}", num_emails);
-
         Ok(())
     }
 
     fn update_sync_state(&self, updates: &[(String, String)]) -> Result<(), Error> {
-        println!("Updating sync_state.json");
 
         let sync_state_path = self.maildir_manager.get_sync_state_path();
         
@@ -675,7 +655,7 @@ impl Backend for GmailBackend {
                 let email = draft.to_lettre_email()?;
                 let raw_bytes = email.formatted();
 
-                let result = self.hub.as_ref().unwrap()
+                let _result = self.hub.as_ref().unwrap()
                     .users()
                     .messages_send(google_gmail1::api::Message::default(), "me") // See documentation of this method for Gmail's API docs.
                     .upload(
@@ -685,16 +665,13 @@ impl Backend for GmailBackend {
                     .await
                     .map_err(|e| Error::Connection(format!("Failed to send email: {}", e)))?;
 
-                println!("Email sent successfully! Message ID: {:?}", result.1.id);
+                // println!("Email sent successfully! Message ID: {:?}", result.1.id);
 
                 Ok(CommandResult::Empty)
             }
             Command::SyncFromCloud => {
-
-                println!("Sync From Cloud Gmail called");
                 
                 let last_sync_id = self.maildir_manager.get_last_sync_id();
-                println!("last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 && !self.maildir_manager.has_synced_emails()? {
                     self.full_sync().await?;
@@ -707,7 +684,6 @@ impl Backend for GmailBackend {
             },
             Command::ViewMailbox { count } => {
                 let emails = self.view_mailbox(count).await.unwrap();
-                println!("emails count: {:?}", emails.len());
                 if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {
