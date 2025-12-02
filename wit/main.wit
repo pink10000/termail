@@ -1,16 +1,51 @@
 package tm:plugin-system;
 
 interface event-api {
+	record before-send {
+		content: option<string>,
+		to: option<string>,
+		fr-om: option<string>,
+		subject: option<string>
+	}
+	record before-send-response {
+		content: option<string>,
+		to: option<string>,
+		fr-om: option<string>,
+		subject: option<string>
+	}
+
+	record after-send {
+		content: string
+	}
+	type after-send-response = result<string, string>;
+
+	record before-receive {
+		content: string
+	}
+	type before-receive-response = result<string, string>;
+
+	record after-receive {
+		content: string
+	}
+	type after-receive-response = result<string, string>;
+
+
 	// The event that is triggered by termail.
 	// This is used as the single source of truth for the event. 
 	// If you plan to extend the event system, you must also
 	// extend the src/plugins/events.rs Hook enum and add the new event
 	// to the variant.
 	variant event {
-		before-send(string),
-		after-send(string),
-		before-receive(string),
-		after-receive(string),
+		before-send(before-send),
+		after-send(after-send),
+		before-receive(before-receive),
+		after-receive(after-receive),
+	}
+	variant response {
+		before-send-response(before-send-response),
+		after-send-response(after-send-response),
+		before-receive-response(before-receive-response),
+		after-receive-response(after-receive-response)
 	}
 }
 interface host-api {
@@ -22,11 +57,12 @@ interface host-api {
 world plugin {
 	import host-api;
 	use event-api.{event};
-
+	use event-api.{response};
+	
 	// termail will call this function when a specific event is triggered
 	// on the host side that the plugin has registered for. This is used
 	// to notify the plugin that an event has occurred.
 	//
 	// The plugin processes the event and returns the modified version.
-	export on-notify: func(invocation-id: string, event: event) -> event;
+	export notify: func(event: event, token: string) -> response;
 }

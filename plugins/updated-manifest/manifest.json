@@ -1,0 +1,6 @@
+{
+	"name": "my awesome plugin!",
+	"description": "does things",
+	"permissions": ["incoming_email.read"],
+	"hooks": ["email_received"]
+}

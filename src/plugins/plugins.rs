@@ -291,21 +291,20 @@ impl PluginManager {
     ///
     /// Plugins are called in sequence, each receiving the output of the previous plugin.
     /// Returns the final content string after all plugins have processed the event.
-    pub async fn dispatch(&mut self, event: event_api::Event) -> Result<String, Error> {
+    pub async fn dispatch(&mut self, event: event_api::Event) -> Result<event_api::Response, Error> {
         // Get the hook for this event to find which plugins to call
         let hook = event.hook();
         
         // Get the plugins registered for this hook
-        let plugins = match self.plugins.get_mut(&hook) {
+       /* let plugins = match self.plugins.get_mut(&hook) {
             Some(plugins) if !plugins.is_empty() => plugins,
             _ => {
                 // No plugins registered for this hook, return the content as-is
                 return Ok(event.content().to_string());
             }
-        };
-
-        let mut current_event = event;
-
+        };*/
+        let mut plugins: Vec<LoadedPlugin> = Vec::new();
+        let mut response = event_api::Response::AfterReceiveResponse(());
         for plugin in plugins.iter_mut() {
             let invocation_id = uuid::Uuid::new_v4().to_string();
 
@@ -313,16 +312,15 @@ impl PluginManager {
                 .active_invocations
                 .lock()
                 .unwrap()
-                .insert(invocation_id.clone(), current_event.clone());
+                .insert(invocation_id.clone(), event.clone());
 
             // Call the plugin's on-notify function and get the modified event back
             // Use block_in_place to allow sync WASI calls without crossing thread boundaries
-            current_event = tokio::task::block_in_place(|| {
+            response = tokio::task::block_in_place(|| {
                 plugin
                     .instance
-                    .call_on_notify(&mut plugin.store, &invocation_id, &current_event)
-            })
-            .map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
+                    .call_notify(&mut plugin.store, &event, &invocation_id)
+            }).map_err(|e| Error::Plugin(format!("Plugin {} failed: {}", plugin.name, e)))?;
 
             // Remove from active_invocations after processing
             self.host_state
@@ -335,6 +333,6 @@ impl PluginManager {
         }
 
         // Return the final content string
-        Ok(current_event.content().to_string())
+        Ok(response)
     }
 }

@@ -40,10 +40,10 @@ impl Hook {
     /// Get the corresponding WIT event variant for a given hook and content
     pub fn to_wit_event(&self, content: String) -> event_api::Event {
         match self {
-            Hook::BeforeSend => event_api::Event::BeforeSend(content),
-            Hook::AfterSend => event_api::Event::AfterSend(content),
-            Hook::BeforeReceive => event_api::Event::BeforeReceive(content),
-            Hook::AfterReceive => event_api::Event::AfterReceive(content),
+            Hook::BeforeSend => event_api::Event::before_send(content),
+            Hook::AfterSend => event_api::Event::after_send(content),
+            Hook::BeforeReceive => event_api::Event::before_receive(content),
+            Hook::AfterReceive => event_api::Event::after_receive(content),
         }
     }
 }
@@ -52,22 +52,30 @@ impl Hook {
 impl event_api::Event {
     /// Create a BeforeSend event with the given content
     pub fn before_send(content: String) -> Self {
-        event_api::Event::BeforeSend(content)
+        event_api::Event::BeforeSend ( event_api::BeforeSend { 
+            content: content 
+        })
     }
 
     /// Create an AfterSend event with the given content
     pub fn after_send(content: String) -> Self {
-        event_api::Event::AfterSend(content)
+        event_api::Event::AfterSend(event_api::AfterSend { 
+            content: content 
+        })
     }
 
     /// Create a BeforeReceive event with the given content
     pub fn before_receive(content: String) -> Self {
-        event_api::Event::BeforeReceive(content)
+        event_api::Event::BeforeReceive(event_api::BeforeReceive { 
+            content: content 
+        })
     }
 
     /// Create an AfterReceive event with the given content
     pub fn after_receive(content: String) -> Self {
-        event_api::Event::AfterReceive(content)
+        event_api::Event::AfterReceive(event_api::AfterReceive { 
+            content: content 
+        })
     }
 
     /// Extract the content string from any event variant
