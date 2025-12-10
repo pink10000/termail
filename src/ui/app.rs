@@ -17,7 +17,7 @@ use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
-use ratatui_image::thread::ThreadProtocol;
+use ratatui_image::{thread::ThreadProtocol, picker::Picker};
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -102,7 +102,7 @@ impl App {
 
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<(), Error> {
         while self.running {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+            terminal.draw(|frame| self.render(frame))?;
             match self.events.next().await? {
                 Event::Tick => self.tick(),
                 Event::Crossterm(event) => match event {
@@ -172,9 +172,17 @@ impl App {
                             self.config.termail.email_fetch_count,
                         );
                     },
-                    AppEvent::Redraw(completed) => {
+                    AppEvent::ImageResizeRequest(request) => {
+                        // Process the resize request and update the protocol
                         if let Some(async_state) = &mut self.async_state {
-                            let _ = async_state.update_resized_protocol(completed?);
+                            match request.resize_encode() {
+                                Ok(response) => {
+                                    let _ = async_state.update_resized_protocol(response);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to resize/encode image: {}", e);
+                                }
+                            }
                         }
                     }
                 }
@@ -185,6 +193,48 @@ impl App {
 
     pub fn quit(&mut self) {
         self.running = false;
+    }
+
+    /// Main render function that has access to Frame for stateful widgets
+    pub fn init_image_protocol_for_email(&mut self, email: &EmailMessage) {
+        let image_attachments = email.get_image_attachments();
+        if image_attachments.is_empty() {
+            self.async_state = None;
+            return;
+        }
+        let picker = match Picker::from_query_stdio() {
+            Ok(picker) => picker,
+            Err(e) => {
+                eprintln!("Failed to initialize image picker: {}, using fallback", e);
+                Picker::from_fontsize((8, 16))
+            }
+        };
+
+        // This only decodes the first image
+        if let Some(attachment) = image_attachments.first() {
+            match image::load_from_memory(&attachment.data) {
+                Ok(dyn_img) => {
+                    eprintln!("Successfully decoded image: {} ({}x{})",
+                             attachment.filename,
+                             dyn_img.width(),
+                             dyn_img.height());
+
+                    // Handler for image resizing. In particular, resizing is just the process of adapting an image
+                    // to fit to the terminal area while encoding it. Stateful widgets like StatefulImage need to be
+                    // able to adapt to the terminal area dynamically.
+                    let tx = self.events.create_image_resize_sender();
+                    let protocol = picker.new_resize_protocol(dyn_img);
+                    // Store in app state
+                    self.async_state = Some(ThreadProtocol::new(tx, Some(protocol)));
+
+                    eprintln!("Image protocol initialized successfully");
+                }
+                Err(e) => {
+                    eprintln!("Failed to decode image {}: {}", attachment.filename, e);
+                    self.async_state = None;
+                }
+            }
+        }
     }
 
     /// Handles the tick event of the terminal.

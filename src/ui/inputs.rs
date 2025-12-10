@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::ui::{
     event::AppEvent,
     app::{App, ActiveViewState, BaseViewState},
@@ -63,6 +63,9 @@ impl App {
                     .lines()
                     .map(|line| line.chars().count() / term_w as usize + 1) // +1 for the \n
                     .sum::<usize>() as u16;
+
+                // Initialize image protocol if email has images
+                self.init_image_protocol_for_email(&selected_email);
 
                 self.state = ActiveViewState::MessageView(Messager { email: selected_email, scroll: 0, content_height });
             }

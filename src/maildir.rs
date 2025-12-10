@@ -206,18 +206,28 @@ impl MaildirManager {
             .cloned()
             .or_else(|| Self::get_filename_from_disposition_static(part));
         
-        // If it has a filename or is marked as attachment, treat it as an attachment
-        if filename.is_some() || is_attachment {
-            if let Some(name) = filename {
-                // Get raw binary data for attachments
-                if let Ok(data) = part.get_body_raw() {
-                    full_attachments.push(EmailAttachment {
-                        filename: name,
-                        content_type: mimetype.clone(),
-                        data,
-                        mime_type: MimeType::AttachmentPNG,
-                    });
+        let is_image = mimetype.starts_with("image/");
+        
+        // If it has a filename, is marked as attachment, OR is an image, treat it as an attachment
+        if filename.is_some() || is_attachment || is_image {
+            // Generate a default filename if none exists
+            let name = filename.unwrap_or_else(|| {
+                if is_image {
+                    let extension = mimetype.strip_prefix("image/").unwrap_or("img");
+                    format!("image.{}", extension)
+                } else {
+                    "attachment".to_string()
                 }
+            });
+            
+            // Get raw binary data for attachments
+            if let Ok(data) = part.get_body_raw() {
+                full_attachments.push(EmailAttachment {
+                    filename: name,
+                    content_type: mimetype.clone(),
+                    data,
+                    mime_type: MimeType::AttachmentPNG,
+                });
             }
         } else if mimetype.starts_with("multipart/") {
             for subpart in &part.subparts {
