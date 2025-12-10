@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 use crate::error::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum MimeType {
     #[default]
     TextPlain,
     TextHtml,
+    AttachmentPNG,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -72,6 +73,7 @@ pub struct EmailAttachment {
     pub filename: String,
     pub content_type: String,
     pub data: Vec<u8>,
+    pub mime_type: MimeType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,5 +125,13 @@ impl EmailMessage {
             .header(lettre::message::header::ContentType::TEXT_PLAIN)
             .body(self.body.clone())
             .map_err(|e: lettre::error::Error| Error::Other(format!("Failed to build email: {}", e)))
+    }
+
+    /// Returns only the image attachments from this email
+    pub fn get_image_attachments(&self) -> Vec<&EmailAttachment> {
+        self.email_attachments
+            .iter()
+            .filter(|att| att.mime_type == MimeType::AttachmentPNG)
+            .collect()
     }
 }

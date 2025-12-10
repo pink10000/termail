@@ -154,8 +154,8 @@ async fn run_cli(
     
     println!("Backend Created: {}", config.termail.default_backend);
     match backend.do_command(command, Some(plugin_manager)).await {
-        Ok(_result) => {
-            // println!("RESULT:\n{}", result);
+        Ok(result) => {
+            println!("RESULT:\n{}", result);
             Ok(())
         }
         Err(e) => {

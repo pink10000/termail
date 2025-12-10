@@ -1,6 +1,6 @@
 use google_gmail1::api::Message;
 use crate::error::Error;
-use crate::core::email::{EmailMessage, EmailSender, MimeType};
+use crate::core::email::{EmailMessage, EmailSender, MimeType, EmailAttachment};
 use maildir::Maildir;
 use std::path::Path;
 use std::collections::HashMap;
@@ -182,36 +182,69 @@ impl MaildirManager {
 
         self.print_email_mime_tree(&raw_content);
 
-        // extract body and mime type from parts
-        let (body, mime_type) = if !parsed.subparts.is_empty() {
-            let mut body = String::new();
-            let mut mime_type = Default::default();
-            
-            for part in &parsed.subparts {
-                if let Ok(text) = part.get_body() {
-                    body.push_str(&text);
-                }
-
-                if let Some(part_mime) = &part.headers.get_first_header("Content-Type") {
-                    let part_mime = part_mime.get_value().to_lowercase();
-                    if part_mime.contains("html") {
-                        mime_type = MimeType::TextHtml;
-                    }
-                }
-            }
-            
-            (body, mime_type)
-        } else {
-            // fallback
-            let body = parsed.get_body()
-                .unwrap_or_else(|_| String::new());
-            (body, MimeType::TextPlain)
-        };
+        let (body, attachments) = Self::walk_mime_parts(&parsed)?;
 
         email.body = body;
-        email.mime_type = mime_type;
+        email.email_attachments = attachments;
 
         Ok(email)
+    }
+
+    /// Recursively walks MIME parts to extract text content and attachments
+    fn walk_mime_parts(part: &ParsedMail) -> Result<(String, Vec<EmailAttachment>), Error> {
+        let mimetype = &part.ctype.mimetype;
+        let mut full_text = String::new();
+        let mut full_attachments = Vec::new();
+        
+        let is_attachment = part.headers
+            .get_first_value("Content-Disposition")
+            .map(|disp| disp.to_lowercase().starts_with("attachment"))
+            .unwrap_or(false);
+        
+        // Get filename from either Content-Type name parameter or Content-Disposition
+        let filename = part.ctype.params.get("name")
+            .cloned()
+            .or_else(|| Self::get_filename_from_disposition_static(part));
+        
+        // If it has a filename or is marked as attachment, treat it as an attachment
+        if filename.is_some() || is_attachment {
+            if let Some(name) = filename {
+                // Get raw binary data for attachments
+                if let Ok(data) = part.get_body_raw() {
+                    full_attachments.push(EmailAttachment {
+                        filename: name,
+                        content_type: mimetype.clone(),
+                        data,
+                        mime_type: MimeType::AttachmentPNG,
+                    });
+                }
+            }
+        } else if mimetype.starts_with("multipart/") {
+            for subpart in &part.subparts {
+                let (subpart_text, subpart_attachments) = Self::walk_mime_parts(subpart)?;
+                full_text.push_str(&subpart_text);
+                full_attachments.extend(subpart_attachments);
+            }
+        } else if mimetype == "text/plain" {
+            // Extract plain text body
+            if let Ok(text) = part.get_body() {
+                full_text.push_str(&text);
+            }
+        } else if mimetype == "text/html" {
+            // Extract HTML body
+            if let Ok(html) = part.get_body() {
+                full_text.push_str(&html);
+            }
+        }
+        // Other MIME types (like application/*, etc.) without filenames are ignored
+        Ok((full_text, full_attachments))
+    }
+
+    /// Static helper to check Content-Disposition for filenames (used in walk_mime_parts)
+    fn get_filename_from_disposition_static(mail: &ParsedMail) -> Option<String> {
+        let disposition = mail.get_headers().get_first_value("Content-Disposition")?;
+        let parsed_disp = parse_content_disposition(&disposition);
+        parsed_disp.params.get("filename").cloned()
     }
 
     // list all emails from maildir (both new and cur directories)
@@ -262,8 +295,9 @@ impl MaildirManager {
             }
         }
 
-        // sort by filename (which contains timestamp) - oldest first (reverse order)
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        // sort by filename (which contains timestamp) - newest first (ascending order)
+        // TODO: make a flag to sort by oldest first (descending order)
+        entries.sort_by(|a, b| b.0.cmp(&a.0));
 
         // take only the requested count
         for (maildir_id, path) in entries.into_iter().take(count) {
@@ -280,7 +314,7 @@ impl MaildirManager {
 
         Ok(emails)
     }
-    
+
     fn print_email_mime_tree(&self, raw_content: &[u8]) {
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e))).unwrap();
@@ -293,7 +327,7 @@ impl MaildirManager {
             
             // Check if it is an attachment by looking for filename params
             let filename: Option<String> = mail.ctype.params.get("name").cloned()
-                .or_else(|| get_filename_from_disposition(mail));
+                .or_else(|| MaildirManager::get_filename_from_disposition_static(mail));
         
             match filename {
                 Some(name) => println!("{}|-- [Attachment] {} ({})", indent, name, mime_type),
@@ -304,13 +338,6 @@ impl MaildirManager {
             for subpart in &mail.subparts {
                 print_tree(subpart, depth + 1);
             }
-        }
-
-        // Helper to check Content-Disposition for filenames
-        fn get_filename_from_disposition<'a>(mail: &'a ParsedMail) -> Option<String> {
-            let disposition = mail.get_headers().get_first_value("Content-Disposition")?;
-            let parsed_disp = parse_content_disposition(&disposition);
-            parsed_disp.params.get("filename").map(|s| s.clone())
         }
 
         println!("--------------------------------");

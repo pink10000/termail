@@ -291,10 +291,13 @@ impl GmailBackend {
                 // update sync state by removing message_id from map
                 sync_state.message_id_to_maildir_id.remove(message_id);
             } else if action == "move_to_new" {
+                // TODO: fix this syncing issue where the image doesn't get pulled from cloud
                 // get maildir id from map
-                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
-                // move message to new in maildir
-                self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                if let Some(maildir_id) = sync_state.message_id_to_maildir_id.get(message_id) {
+                    self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                } else {
+                    eprintln!("Message id not found in sync state: {}", message_id);
+                }
             } else if action == "move_to_cur" {
                 // get maildir id from map
                 let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
@@ -688,12 +691,16 @@ impl Backend for GmailBackend {
             },
             Command::ViewMailbox { count } => {
                 let emails = self.view_mailbox(count).await.unwrap();
-                if emails.is_empty() {
+                // filter emails to the ones that only have image attachments
+                let filtered_emails: Vec<EmailMessage> = emails.into_iter()
+                    .filter(|email| email.get_image_attachments().is_empty())
+                    .collect();
+                if filtered_emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {
-                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
+                    Ok(CommandResult::Email(filtered_emails.into_iter().next().unwrap()))
                 } else {
-                    Ok(CommandResult::Emails(emails))
+                    Ok(CommandResult::Emails(filtered_emails))
                 }
             },
             Command::Null => Ok(CommandResult::Empty)
