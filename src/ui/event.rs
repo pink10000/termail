@@ -1,5 +1,6 @@
 use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
+use ratatui_image::thread::ResizeResponse;
 use tokio::task::JoinHandle;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -10,7 +11,6 @@ use crate::error::Error;
 const TICK_FPS: f64 = 30.0;
 
 /// Terminal event.
-#[derive(Clone, Debug)]
 pub enum Event {
     /// A tick event emitted at a fixed rate.
     Tick,
@@ -20,13 +20,13 @@ pub enum Event {
     App(AppEvent),
 }
 
-#[derive(Clone, Debug)]
 pub enum AppEvent {
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
     SpawnEditor,
     SendEmail(EmailMessage),
     SyncFromCloud,
+    Redraw(Result<ResizeResponse, Error>),
     Quit,
 }
 

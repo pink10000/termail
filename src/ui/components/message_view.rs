@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Paragraph, Widget},   
 };
 use crate::core::email::EmailMessage;
 
@@ -19,6 +19,14 @@ impl Widget for Messager {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let email_from = &self.email.from;
         let email_body = &self.email.body;
+        
+        // Count image attachments
+        let image_count = self.email.get_image_attachments().len();
+        let attachment_info = if image_count > 0 {
+            format!("\n\n{} image attachment(s)", image_count)
+        } else {
+            String::new()
+        };
 
         let block = Block::default()
             .title(email_from.display_name())
@@ -28,7 +36,9 @@ impl Widget for Messager {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
         
-        let paragraph = Paragraph::new(email_body.clone())
+        let full_text = format!("{}{}", email_body, attachment_info);
+        
+        let paragraph = Paragraph::new(full_text)
             .wrap(ratatui::widgets::Wrap { trim: false }) 
             .scroll((self.scroll, 0))
             .block(block);

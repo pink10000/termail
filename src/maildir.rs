@@ -180,7 +180,7 @@ impl MaildirManager {
         email.to = parsed.headers.get_first_value("To").unwrap_or_default();
         email.date = parsed.headers.get_first_value("Date").unwrap_or_default();
 
-        self.print_email_mime_tree(&raw_content);
+        // self.print_email_mime_tree(&raw_content);
 
         let (body, attachments) = Self::walk_mime_parts(&parsed)?;
 
@@ -315,7 +315,7 @@ impl MaildirManager {
         Ok(emails)
     }
 
-    fn print_email_mime_tree(&self, raw_content: &[u8]) {
+    fn _print_email_mime_tree(&self, raw_content: &[u8]) {
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e))).unwrap();
 

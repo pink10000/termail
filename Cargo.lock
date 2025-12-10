@@ -3122,6 +3122,7 @@ dependencies = [
  "ratatui 0.29.0",
  "rustix 0.38.44",
  "thiserror 1.0.69",
+ "tokio",
  "windows",
 ]
 

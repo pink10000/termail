@@ -17,6 +17,7 @@ use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
+use ratatui_image::thread::ThreadProtocol;
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -56,6 +57,8 @@ pub struct App {
     pub selected_folder: String,
     /// Plugin manager for executing plugins
     pub plugin_manager: Arc<Mutex<PluginManager>>,
+    /// Thread protocol for async image rendering (None when no image is being viewed)
+    pub async_state: Option<ThreadProtocol>,
 }
 
 impl App {
@@ -93,6 +96,7 @@ impl App {
             selected_email_index: Some(0),  // Start with first email selected
             selected_folder: "INBOX".to_string(),
             plugin_manager,
+            async_state: None,  // No image protocol until we enter message view
         }
     }
 
@@ -167,6 +171,11 @@ impl App {
                             self.events.get_sender(),
                             self.config.termail.email_fetch_count,
                         );
+                    },
+                    AppEvent::Redraw(completed) => {
+                        if let Some(async_state) = &mut self.async_state {
+                            let _ = async_state.update_resized_protocol(completed?);
+                        }
                     }
                 }
             }

@@ -29,7 +29,7 @@ cap-std = "3.4.5"
 maildir = "0.6.4"
 mailparse = "0.14"
 image = "0.25.9"
-ratatui-image = "8.0.2"
+ratatui-image = { version = "8.0.2", features = ["crossterm", "tokio"] }
 
 [profile.dev.package.wasmtime]
 opt-level = 3
