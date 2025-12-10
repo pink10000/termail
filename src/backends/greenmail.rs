@@ -261,4 +261,17 @@ impl Backend for GreenmailBackend {
             Command::Null => Ok(CommandResult::Empty)
         }
     }
+
+    /// Defines which commands require authentication to the Greenmail service.
+    fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
+        match cmd {
+            Command::SyncFromCloud => Some(true),
+            Command::ViewMailbox { count: _ } => Some(false),
+            Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
+            // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for greenmail backend
+            Command::ListLabels => Some(false),
+            Command::Null => Some(false),
+            _ => None
+        }
+    }
 }

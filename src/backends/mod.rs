@@ -24,6 +24,11 @@ pub trait Backend: Send {
     /// 
     /// The plugin_manager is optional - only pass it for commands that need plugin dispatch
     async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error>;
+
+    /// Check if a particular command requires authentication
+    /// 
+    /// This function WILL NOT authenticate the backend and `authenticate()` should be called after.
+    fn requires_authentication(&self, cmd: &Command) -> Option<bool>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]

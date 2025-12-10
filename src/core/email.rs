@@ -71,7 +71,7 @@ impl EmailSender {
 pub struct EmailAttachment {
     pub filename: String,
     pub content_type: String,
-    pub content: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

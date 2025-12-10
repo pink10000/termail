@@ -311,8 +311,21 @@ impl MaildirManager {
             let disposition = mail.get_headers().get_first_value("Content-Disposition")?;
             let parsed_disp = parse_content_disposition(&disposition);
             parsed_disp.params.get("filename").map(|s| s.clone())
-        }      
+        }
 
+        println!("--------------------------------");
+        println!("Subject: {}", parsed.headers.get_first_value("Subject").unwrap_or_default());
+        println!("From: {}", parsed.headers.get_first_value("From").unwrap_or_default());
+        if let Some(to) = parsed.headers.get_first_value("To") {
+            let to_emails_len = to.split(",").count();
+            if to_emails_len >= 3 {
+                println!("To: {} total emails (>= 3 detected)", to_emails_len);
+            } else {
+                println!("To: {}", to);
+            }
+        }
+        println!("Date: {}", parsed.headers.get_first_value("Date").unwrap_or_default());
         print_tree(&parsed, 0);
+        println!("--------------------------------\n");
     }
 }

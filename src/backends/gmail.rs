@@ -699,5 +699,18 @@ impl Backend for GmailBackend {
             Command::Null => Ok(CommandResult::Empty)
         }
     }
+
+    /// Defines which commands require authentication to the Gmail service.
+    fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
+        match cmd {
+            Command::SyncFromCloud => Some(true),
+            Command::ViewMailbox { count: _ } => Some(false),
+            Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
+            // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for gmail backend
+            Command::ListLabels => Some(true),
+            Command::Null => Some(false),
+            _ => None
+        }
+    }
 }
 
