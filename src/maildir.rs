@@ -162,10 +162,11 @@ impl MaildirManager {
         }
     }
 
-    /// parse an RFC822 email format into an EmailMessage struct using mailparse crate
-    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {
-        
-        // use mailparse to parse the email
+    /// Parses an RFC822 email format into termail's EmailMessage struct using the `mailparse` crate.
+    /// # Arguments
+    /// * `raw_content` - The raw content of the email in RFC822 format.
+    /// * `maildir_id` - The ID of the email in the maildir.
+    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {        
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e)))?;
 
@@ -174,21 +175,12 @@ impl MaildirManager {
         // fine rn since we are not doing any actions from the TUI that we want to sync up
 
         // extract headers using mailparse (automatically decodes MIME encoded-words)
-        if let Some(subject) = parsed.headers.get_first_value("Subject") {
-            email.subject = subject;
-        }
+        email.subject = parsed.headers.get_first_value("Subject").unwrap_or_default();
+        email.from = EmailSender::from(parsed.headers.get_first_value("From").unwrap_or_default());
+        email.to = parsed.headers.get_first_value("To").unwrap_or_default();
+        email.date = parsed.headers.get_first_value("Date").unwrap_or_default();
 
-        if let Some(from) = parsed.headers.get_first_value("From") {
-            email.from = EmailSender::from(from);
-        }
-
-        if let Some(to) = parsed.headers.get_first_value("To") {
-            email.to = to;
-        }
-
-        if let Some(date) = parsed.headers.get_first_value("Date") {
-            email.date = date;
-        }
+        self.print_email_mime_tree(&raw_content);
 
         // extract body and mime type from parts
         let (body, mime_type) = if !parsed.subparts.is_empty() {
@@ -196,8 +188,7 @@ impl MaildirManager {
             let mut mime_type = Default::default();
             
             for part in &parsed.subparts {
-                if let Ok(text) = part.get_body()
-                {
+                if let Ok(text) = part.get_body() {
                     body.push_str(&text);
                 }
 
@@ -290,4 +281,38 @@ impl MaildirManager {
         Ok(emails)
     }
     
+    fn print_email_mime_tree(&self, raw_content: &[u8]) {
+        let parsed = parse_mail(raw_content)
+            .map_err(|e| Error::Other(format!("Failed to parse email: {}", e))).unwrap();
+
+        fn print_tree(mail: &ParsedMail, depth: usize) {
+            let indent = "    ".repeat(depth);
+            
+            // Extract the MIME type (e.g., "text/plain", "multipart/mixed")
+            let mime_type = &mail.ctype.mimetype;
+            
+            // Check if it is an attachment by looking for filename params
+            let filename: Option<String> = mail.ctype.params.get("name").cloned()
+                .or_else(|| get_filename_from_disposition(mail));
+        
+            match filename {
+                Some(name) => println!("{}|-- [Attachment] {} ({})", indent, name, mime_type),
+                None => println!("{}|-- [Part] {}", indent, mime_type),
+            }
+        
+            // Recurse into subparts (Context Frames)
+            for subpart in &mail.subparts {
+                print_tree(subpart, depth + 1);
+            }
+        }
+
+        // Helper to check Content-Disposition for filenames
+        fn get_filename_from_disposition<'a>(mail: &'a ParsedMail) -> Option<String> {
+            let disposition = mail.get_headers().get_first_value("Content-Disposition")?;
+            let parsed_disp = parse_content_disposition(&disposition);
+            parsed_disp.params.get("filename").map(|s| s.clone())
+        }      
+
+        print_tree(&parsed, 0);
+    }
 }

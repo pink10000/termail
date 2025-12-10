@@ -13,12 +13,27 @@ use std::path::PathBuf;
 use std::fs;
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub enum ImageProtocol {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "kitty")]
+    Kitty,
+    #[serde(rename = "iterm2")]
+    Iterm2,
+    #[serde(rename = "sixel")]
+    Sixel
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct TermailConfig {
     pub cli: bool,
     pub default_backend: BackendType,
     pub email_fetch_count: usize,
     pub editor: String, 
     pub plugins: Vec<String>,
+    /// The image protocol to use for displaying images.
+    /// If not set, the application will not render any images.
+    pub image_protocol: Option<ImageProtocol>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

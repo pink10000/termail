@@ -68,6 +68,13 @@ impl EmailSender {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub content: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailMessage {
     pub id: String,
     pub subject: String,
@@ -76,6 +83,7 @@ pub struct EmailMessage {
     pub date: String,
     pub body: String,
     pub mime_type: MimeType,
+    pub email_attachments: Vec<EmailAttachment>,
 }
 
 impl EmailMessage {
@@ -88,6 +96,7 @@ impl EmailMessage {
             date: String::new(),
             body: String::new(),
             mime_type: Default::default(),
+            email_attachments: Vec::new(),
         }
     }
 
