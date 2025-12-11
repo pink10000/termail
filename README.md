@@ -1,5 +1,5 @@
 # termail
-A terminal mail client inspired by mutt and notmuch, written in Rust. 
+A terminal mail client inspired by mutt and notmuch, written in Rust.
 
 # Features
 Features
@@ -8,13 +8,16 @@ Features
 - Maildir Synchronization: Syncs emails to local storage using the [Maildir](https://en.wikipedia.org/wiki/Maildir) format for offline access.
 - Plugin System: Extensible via [WebAssembly (WASM)](https://github.com/WebAssembly/WASI) modules using [WIT](https://component-model.bytecodealliance.org) bindings.
 - External Editor: Composes emails using your preferred editor (e.g., Vim, Neovim, VS Code).
+- Image Support: Automatically displays PNGs to the terminal (TUI mode only).
 
 # Installation
 Prerequisites:
 - Rust toolchain
 - Docker (optional, for running local Greenmail test server)
+- A terminal with graphics protocls. See [here](https://github.com/benjajaja/ratatui-image?tab=readme-ov-file#compatibility-matrix)
+  for a list of available terminals. We suggest using [Kitty](https://github.com/kovidgoyal/kitty) or [Ghostty](https://github.com/ghostty-org/ghostty).
 
-Then, clone and simply run 
+Then, clone and simply run
 ```bash
 cargo build --release
 ```
@@ -101,8 +104,8 @@ View downloaded messages in TUI
 cargo run --  --backend Gmail view-mailbox
 ```
 
-Null: 
-```bash 
+Null:
+```bash
 cargo run -- --cli null
 ```
 This is primarily used for testing if your plugins are being properly loaded.
@@ -116,7 +119,7 @@ Each plugin directory must contain a `manifest.toml`:
 name = "MyPlugin"
 description = "Does something cool"
 backends = ["gmail"]
-hooks = ["before_send"] 
+hooks = ["before_send"]
 ```
 See `plugins/` for more examples.
 
@@ -133,16 +136,16 @@ application. You can run Greenmail by
 ```
 docker compose -f test/docker-compose.yml up
 ```
-or detach it with `-d`. 
+or detach it with `-d`.
 
-You can send an email to the Greenmail server via 
-```bash 
+You can send an email to the Greenmail server via
+```bash
 cargo run -- --cli send-email --to "user1@example.com"
 ```
 The cli args `--to`, `--subject` and `--body` are optional but if they are provided they will be used to preffil the temp pop up editor. 
 
 and test fetching the top email using
-```bash 
+```bash
 cargo run -- --cli --backend Greenmail fetch-inbox
 ```
 
