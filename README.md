@@ -1,5 +1,5 @@
 # termail
-A terminal mail client inspired by mutt and notmuch, written in Rust.
+A terminal mail client inspired by mutt and notmuch, written in Rust, using [ratatui](https://github.com/ratatui/ratatui).
 
 # Features
 Features
@@ -142,7 +142,7 @@ You can send an email to the Greenmail server via
 ```bash
 cargo run -- --cli send-email --to "user1@example.com"
 ```
-The cli args `--to`, `--subject` and `--body` are optional but if they are provided they will be used to preffil the temp pop up editor. 
+The cli args `--to`, `--subject` and `--body` are optional but if they are provided they will be used to preffil the temp pop up editor.
 
 and test fetching the top email using
 ```bash
@@ -156,3 +156,10 @@ cargo run -- --cli --backend Gmail sync-from-cloud
 
 # Acknowledgement
 As part of UCSD's [CSE 291Y](https://plsyssec.github.io/cse291y-fall25/).
+
+The following libraries make this project possible:
+- [ratatui](https://github.com/ratatui/ratatui)
+    - [ratatui-image](https://github.com/benjajaja/ratatui-image)
+- [tokio](https://github.com/tokio-rs/tokio)
+- [image-rs](https://github.com/image-rs/image)
+- [wasmtime](https://github.com/bytecodealliance/wasmtime)
