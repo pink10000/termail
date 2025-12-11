@@ -369,7 +369,11 @@ impl Backend for GreenmailBackend {
                     Ok(CommandResult::Emails(emails))
                 }
             }
-            Command::Null => Ok(CommandResult::Empty)
+            Command::Null => Ok(CommandResult::Empty),
+            Command::LoadEmail { email_id } => {
+                let email = self.maildir_manager.load_email_with_attachments(&email_id)?;
+                Ok(CommandResult::Email(email))
+            }
         }
     }
 

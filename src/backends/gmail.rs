@@ -197,7 +197,6 @@ impl GmailBackend {
     }
 
     async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
-        // println!("Starting incremental sync");
         let result = self.hub.as_ref().unwrap()
             .users()
             .history_list("me")
@@ -233,7 +232,6 @@ impl GmailBackend {
 
         // create a map of message id to action that was taken and we overwrite if there are multiple actions for the same message since records are in chronological order
         let mut message_id_to_action: HashMap<String, String> = HashMap::new();
-
 
         for history_record in history_records.1.history.unwrap() {
             if history_record.labels_added.is_some() {
@@ -284,18 +282,15 @@ impl GmailBackend {
         // do the right thing based on the action
         for (message_id, action) in message_id_to_action.iter() {
             // get maildir id from map
-            
+            tracing::debug!("message_id: {}, action: {}", message_id, action);
             let maildir_id = mapping.get(message_id).unwrap();
             
             match action.as_str() {
                 "delete" => {
-                    // delete message from maildir using maildir_id
                     self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
-                    // remove mapping from db
                     self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
                 }
                 "move_to_new" => {
-                    // move message to new in maildir
                     self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
                 }
                 "move_to_cur" => {
@@ -585,7 +580,7 @@ impl Backend for GmailBackend {
         Ok(())
     }
 
-    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {        
+    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {
         match cmd {
             Command::FetchInbox { count } => {
                 let emails = self.fetch_inbox_emails(count).await.unwrap();
@@ -675,17 +670,17 @@ impl Backend for GmailBackend {
             },
             Command::ViewMailbox { count } => {
                 let emails = self.view_mailbox(count).await.unwrap();
-                // filter emails to the ones that only have image attachments
-                let filtered_emails: Vec<EmailMessage> = emails.into_iter()
-                    .filter(|email| email.get_image_attachments().is_empty())
-                    .collect();
-                if filtered_emails.is_empty() {
+                if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {
-                    Ok(CommandResult::Email(filtered_emails.into_iter().next().unwrap()))
+                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
                 } else {
-                    Ok(CommandResult::Emails(filtered_emails))
+                    Ok(CommandResult::Emails(emails))
                 }
+            },
+            Command::LoadEmail { email_id } => {
+                let email = self.maildir_manager.load_email_with_attachments(&email_id)?;
+                Ok(CommandResult::Email(email))
             },
             Command::Null => Ok(CommandResult::Empty)
         }
@@ -696,6 +691,7 @@ impl Backend for GmailBackend {
         match cmd {
             Command::SyncFromCloud => Some(true),
             Command::ViewMailbox { count: _ } => Some(false),
+            Command::LoadEmail { email_id: _ } => Some(false),
             Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
             // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for gmail backend
             Command::ListLabels => Some(true),

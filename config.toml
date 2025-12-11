@@ -2,7 +2,7 @@
 [termail]
 cli = false
 default_backend = "greenmail"
-email_fetch_count = 20
+email_fetch_count = 100
 editor = "code"   # "vim" or "code" for VSCode
 plugins = [] # plugins are not case-sensitive
 

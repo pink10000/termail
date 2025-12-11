@@ -24,10 +24,10 @@ cargo build --release
 
 # Configuration
 Termail requires a configuration file to run. The application searches for config.toml in the following order:
-- Path specified via --config-file argument.
-- Current directory (./config.toml).
-- User config directory (~/.config/termail/config.toml).
-- System config directory (/etc/termail/config.toml).
+- Path specified via `--config-file` argument.
+- Current directory (`./config.toml`).
+- User config directory (`~/.config/termail/config.toml`).
+- System config directory (`/etc/termail/config.toml`).
 
 ## Config Structure
 Create a config.toml file with the following structure:
