@@ -7,27 +7,15 @@ interface event-api {
 		fr-om: option<string>,
 		subject: option<string>
 	}
-	record before-send-response {
-		content: option<string>,
-		to: option<string>,
-		fr-om: option<string>,
-		subject: option<string>
-	}
-
 	record after-send {
 		content: option<string>
 	}
-	type after-send-response = result<string, string>;
-
 	record before-receive {
 		content: option<string>
 	}
-	type before-receive-response = result<string, string>;
-
 	record after-receive {
 		content: option<string>
 	}
-	type after-receive-response = result<string, string>;
 
 
 	// The event that is triggered by termail.
@@ -41,12 +29,6 @@ interface event-api {
 		before-receive(before-receive),
 		after-receive(after-receive),
 	}
-	variant response {
-		before-send-response(before-send-response),
-		after-send-response(after-send-response),
-		before-receive-response(before-receive-response),
-		after-receive-response(after-receive-response)
-	}
 }
 interface host-api {
 	// The plugin calls this function to perform an action on the host.
@@ -57,12 +39,11 @@ interface host-api {
 world plugin {
 	import host-api;
 	use event-api.{event};
-	use event-api.{response};
 	
 	// termail will call this function when a specific event is triggered
 	// on the host side that the plugin has registered for. This is used
 	// to notify the plugin that an event has occurred.
 	//
 	// The plugin processes the event and returns the modified version.
-	export notify: func(event: event, token: string) -> response;
+	export notify: func(event: event) -> event;
 }

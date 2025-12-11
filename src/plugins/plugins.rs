@@ -211,6 +211,40 @@ impl PluginManager {
 		Ok(loaded_plugins_count)
 	}
 
+	// clone the git repo into the plugins folder specified in the termail config
+	// parse the manifest and make the user agree to the manifest => pop them into a vim shell of the manifest and be like u sure dog
+	pub async fn install_plugin(repo_url: String, commit: String, cfg: TermailConfig) -> Result<(),()> {
+		let url = gix::url::parse(BStr::new(&repo_url)).unwrap();
+
+		// Handle someone pressing ctrl+c? don't do any memory ops in here
+		// literally just leave it like this and don't add anything it's from
+		// the documentation 
+		// https://github.com/GitoxideLabs/gitoxide/blob/main/gix/examples/clone.rs
+		unsafe {
+			gix::interrupt::init_handler(1, || {}).unwrap();
+		}
+		
+		// Create a directory for the plugin that has the same path as the git repo
+		// It's probably safe to do! I join with "/" on the path first to avoid 
+		// a directory traversal vulnerability :3
+		let path = Path::new(&cfg.plugin_dir).join(
+			Path::new("/").join(url.path.to_string())
+		);
+
+		std::fs::create_dir_all(&path);
+
+		let mut prepare_fetch = gix::prepare_clone(url, &path).unwrap();
+
+		let (repo, outcome) = prepare_fetch.fetch_only(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED).await.unwrap();
+		println!("done?");
+		//let remote = repo.find_default_remote(gix::remote::Direction::Fetch);
+		Ok(())
+	}
+
+	fn load_plugin(git_path: String, cfg: TermailConfig) {
+		
+	}
+
 	/// Load a single plugin manifest
 	///
 	/// If a plugin has no backends it can operate on, it should not be loaded.
@@ -304,6 +338,7 @@ impl PluginManager {
 				return Ok(event.content().to_string());
 			}
 		};*/
+		
 		let mut plugins: Vec<LoadedPlugin> = Vec::new();
 		for plugin in plugins.iter_mut() {
 			let invocation_id = uuid::Uuid::new_v4().to_string();
@@ -316,7 +351,7 @@ impl PluginManager {
 
 			// Call the plugin's on-notify function and get the modified event back
 			// Use block_in_place to allow sync WASI calls without crossing thread boundaries
-			/*response = tokio::task::block_in_place(|| {
+			/*let mut response = tokio::task::block_in_place(|| {
 				plugin
 					.instance
 					.call_notify(&mut plugin.store, &event, &invocation_id)
