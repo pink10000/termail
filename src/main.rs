@@ -16,6 +16,8 @@ use ui::app::App;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::plugins::permissions::{self, install_plugin};
+
 async fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
     let mut backend: Box<dyn Backend> = config.get_backend();
     
@@ -122,6 +124,13 @@ async fn run_cli(
             return Err(1);
         }
     };
+
+    match command {
+        Command::InstallPlugin { commit, url } => (
+            install_plugin(url, commit, config)
+        ),
+        default() => ()
+    }
 
     match plugin_manager.load_plugins(enabled_plugins) {
         Ok(count) => println!("Loaded successfully: {} plugins", count),

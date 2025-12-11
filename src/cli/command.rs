@@ -35,6 +35,11 @@ pub enum Command {
         count: usize,
     },
 
+    InstallPlugin {
+        url: String,
+        commit: String,
+    },
+
     /// Null command (used for testing plugins))
     Null
 }

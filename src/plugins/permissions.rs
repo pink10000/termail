@@ -31,7 +31,7 @@ pub struct Manifest {
 	permissions: Vec<Permission>
 }
 
-async fn install_plugin(repo_url: String, commit: String, cfg: TermailConfig) -> Result<(),()> {
+pub async fn install_plugin(repo_url: String, commit: String, cfg: TermailConfig) -> Result<(),()> {
 	let url = gix::url::parse(BStr::new(&repo_url)).unwrap();
 
 	// Handle someone pressing ctrl+c? don't do any memory ops in here
@@ -54,7 +54,8 @@ async fn install_plugin(repo_url: String, commit: String, cfg: TermailConfig) ->
 	let mut prepare_fetch = gix::prepare_clone(url, &path).unwrap();
 
 	let (repo, outcome) = prepare_fetch.fetch_only(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED).await.unwrap();
-	
+	println!(repo);
+	println!("done?");
 	//let remote = repo.find_default_remote(gix::remote::Direction::Fetch);
 	Ok(())
 }
