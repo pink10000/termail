@@ -44,12 +44,22 @@ impl<'a> Widget for Inbox<'a> {
             Some(emails) => emails
                 .iter()
                 .map(|email| {
+                    let subject_style = if email.is_new {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let from_style = if email.is_new {
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
                     let from = &email.from;
                     let subject = &email.subject;
                     let line = Line::from(vec![
-                        Span::styled(format!("{:<25.25}", from), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{:<25.25}", from), from_style),
                         Span::raw(" "),
-                        Span::styled(subject, Style::default().fg(Color::White)),
+                        Span::styled(subject, subject_style),
                     ]);
                     ListItem::new(line)
                 })

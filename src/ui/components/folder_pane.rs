@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, Widget},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Widget},
 };
 use crate::core::label::Label;
 use crate::ui::app::BaseViewState;
@@ -13,6 +13,8 @@ pub struct FolderPane<'a> {
     pub labels: Option<&'a Vec<Label>>,
     /// Whether the user focus is currently on this pane.
     pub state: &'a BaseViewState,
+    /// Currently selected folder name for highlighting.
+    pub selected_folder: &'a str,
 }
 
 impl<'a> Widget for FolderPane<'a> {
@@ -49,13 +51,31 @@ impl<'a> Widget for FolderPane<'a> {
         let list = List::new(items)
             .block(block)
             .style(Style::default().fg(Color::White))
+            .highlight_symbol("▶ ")
             .highlight_style(
                 Style::default()
                     .fg(Color::Yellow)
+                    .bg(if is_active { Color::Blue } else { Color::DarkGray })
                     .add_modifier(Modifier::BOLD)
             );
         
-        list.render(area, buf);
+        // Determine selected folder index for highlighting
+        let selected_index = self.labels.and_then(|labels| {
+            labels
+                .iter()
+                .enumerate()
+                .find_map(|(idx, label)| {
+                    label
+                        .name
+                        .as_deref()
+                        .and_then(|name| (name == self.selected_folder).then_some(idx))
+                })
+        });
+
+        let mut state = ListState::default();
+        state.select(selected_index);
+
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
     }
 }
 

@@ -40,6 +40,9 @@ impl App {
             // Handle View Cycling
             (BaseViewState::Labels, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
             (BaseViewState::Inbox, KeyCode::Tab) => self.state = ActiveViewState::BaseView(BaseViewState::Labels),
+            // Navigate folders when the folder pane is focused
+            (BaseViewState::Labels, KeyCode::Down) => self.select_next_folder(),
+            (BaseViewState::Labels, KeyCode::Up) => self.select_previous_folder(),
                 
             // TODO: Handle scrolling through the labels.
             (BaseViewState::Inbox, KeyCode::Down) => self.hover_next_email(),
@@ -81,6 +84,56 @@ impl App {
             if index > 0 {
                 self.selected_email_index = Some(index - 1);
             }
+        }
+    }
+
+    /// Move the folder selection down by one position.
+    fn select_next_folder(&mut self) {
+        self.shift_selected_folder(1);
+    }
+
+    /// Move the folder selection up by one position.
+    fn select_previous_folder(&mut self) {
+        self.shift_selected_folder(-1);
+    }
+
+    /// Shared logic for updating the selected folder based on direction.
+    fn shift_selected_folder(&mut self, direction: isize) {
+        let labels = match &self.labels {
+            Some(labels) if !labels.is_empty() => labels,
+            _ => return,
+        };
+
+        // Build a list of indices that have displayable names.
+        let selectable_indices: Vec<usize> = labels
+            .iter()
+            .enumerate()
+            .filter(|(_, label)| label.name.is_some())
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if selectable_indices.is_empty() {
+            return;
+        }
+
+        let current_position = selectable_indices
+            .iter()
+            .position(|&idx| {
+                labels[idx]
+                    .name
+                    .as_deref()
+                    .map(|name| name == self.selected_folder)
+                    .unwrap_or(false)
+            })
+            .unwrap_or(0);
+
+        let max_pos = (selectable_indices.len() - 1) as isize;
+        let mut new_position = current_position as isize + direction;
+        new_position = new_position.clamp(0, max_pos);
+
+        let new_label_idx = selectable_indices[new_position as usize];
+        if let Some(name) = labels[new_label_idx].name.clone() {
+            self.selected_folder = name;
         }
     }
 

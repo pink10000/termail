@@ -129,6 +129,7 @@ impl App {
                 FolderPane {
                     labels: self.labels.as_ref(),
                     state: bv,
+                    selected_folder: &self.selected_folder,
                 }.render(middle_layout[0], buf);
 
                 Inbox {
