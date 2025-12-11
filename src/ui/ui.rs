@@ -45,33 +45,28 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
-        
+
         let paragraph = Paragraph::new(text)
             .block(block)
             .fg(Color::White)
             .centered();
-        
+
         paragraph.render(area, buf);
     }
 
-    pub fn render_bottom_bar(&self, area: Rect, buf: &mut Buffer) {
+    pub fn render_bottom_bar(&self, area: Rect, buf: &mut Buffer, content: String) {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
-        
-        let status = match &self.emails {
-            None => "Loading emails...".to_string(),
-            Some(emails) => format!("{} email(s) | Press ESC to quit | Tab to cycle views", emails.len()),
-        };
-        
-        let paragraph = Paragraph::new(status)
+
+        let paragraph = Paragraph::new(content)
             .block(block)
             .fg(Color::White)
             .centered();
-        
+
         paragraph.render(area, buf);
-    }    
+    }
 
     /// Calculate the optimal folder pane width based on loaded labels
     /// Returns the width in characters + 2 for the borders, or 20 if labels aren't loaded yet
@@ -83,10 +78,10 @@ impl App {
                     let name = label.name.as_ref()?;
                     // let unread = label.messages_unread?;
                     // let total = label.messages_total?;
-                    
+
                     // Calculate the display width: "Name (unread/total)"
                     let width = name.len();
-                    
+
                     Some(width)
                 })
                 .max()
@@ -116,7 +111,6 @@ impl App {
         let area = frame.area();
         let buf = frame.buffer_mut();
         let layouts = self.create_layouts(area);
-        self.render_bottom_bar(layouts.bottom_bar, buf);
 
         match &self.state {
             ActiveViewState::BaseView(bv) => {
@@ -132,16 +126,22 @@ impl App {
                     ])
                     .split(layouts.middle);
 
-                frame.render_widget(FolderPane {
+                FolderPane {
                     labels: self.labels.as_ref(),
                     state: bv,
-                }, middle_layout[0]);
+                }.render(middle_layout[0], buf);
 
-                frame.render_widget(Inbox {
+                Inbox {
                     emails: self.emails.as_ref(),
                     selected_index: self.selected_email_index,
                     state: bv,
-                }, middle_layout[1]);
+                }.render(middle_layout[1], buf);
+
+                let status = match &self.emails {
+                    None => "Loading emails...".to_string(),
+                    Some(emails) => format!("{} email(s) | Press ESC to quit | Tab to cycle views", emails.len()),
+                };
+                self.render_bottom_bar(layouts.bottom_bar, buf, status);
             },
             ActiveViewState::MessageView(messager) => {
                 let email = self.selected_email_index
@@ -152,6 +152,9 @@ impl App {
                 self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
 
                 messager.render_with_images(layouts.middle, buf, &mut self.async_state);
+                let status = format!("{} image attachment(s) | Press ESC to quit", email.get_image_attachments().len());
+                self.render_bottom_bar(layouts.bottom_bar, buf, status);
+
             },
             ActiveViewState::ComposeView(composer) => {
                 self.render_top_bar(layouts.top_bar, buf, "Compose Email".to_string());
