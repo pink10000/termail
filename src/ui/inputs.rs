@@ -115,7 +115,7 @@ impl App {
             match key_event.code {
                 KeyCode::Enter => {
                     // TODO: check if the email is valid
-                    println!("Sending email: {:?}", cvs.draft);
+                    tracing::info!("Sending email: {:?}", cvs.draft);
                     self.events.send(AppEvent::SendEmail(cvs.draft.clone()));
                     self.state = ActiveViewState::BaseView(BaseViewState::Inbox);
                     // Return early to avoid borrowing `self.state` again. Alternatively,

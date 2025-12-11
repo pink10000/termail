@@ -22,7 +22,7 @@ async fn create_authenticated_backend(config: &Config) -> Box<dyn Backend> {
     
     if backend.needs_oauth() {
         if let Err(e) = backend.authenticate().await {
-            eprintln!("Authentication failed: {}", e);
+            tracing::error!("Authentication failed: {}", e);
             std::process::exit(1);
         }
     }
@@ -50,6 +50,10 @@ pub struct Args {
     /// Log file directory
     #[arg(long, value_parser = clap::value_parser!(PathBuf))]
     log_dir: Option<String>,
+
+    /// Verbosity level
+    #[arg(short, long, action = ArgAction::Count)]
+    verbosity: Option<u8>,
 }
 
 #[tokio::main]
@@ -60,7 +64,14 @@ async fn main() {
         std::process::exit(1);
     });
     config.merge(&args);
-    
+
+    if let Err(e) = logger::init_logger(!config.termail.cli, args.verbosity.unwrap_or(0), config.get_log_path()) {
+        eprintln!("Error initializing logger: {}", e);
+        std::process::exit(1);
+    }
+
+    tracing::info!("Logger initialized at {:?}", config.get_log_path());
+
     let mut plugin_manager = PluginManager::new().unwrap();
     let enabled_plugins = config.termail.plugins.clone();
 
@@ -104,11 +115,11 @@ async fn run_tui(
     ratatui::restore();
     match tui_result {
         Ok(_) => {
-            println!("TUI exited successfully");
+            tracing::info!("TUI exited successfully");
             Ok(())
         }
         Err(e) => {
-            eprintln!("TUI error: {}", e);
+            tracing::error!("TUI error: {}", e);
             Err(1)
         }
     }
@@ -123,15 +134,15 @@ async fn run_cli(
     let command = match command {
         Some(cmd) => cmd,
         None => {
-            eprintln!("Missing Subcommand for CLI mode.");
+            tracing::error!("Missing Subcommand for CLI mode.");
             return Err(1);
         }
     };
 
     match plugin_manager.load_plugins(enabled_plugins) {
-        Ok(count) => println!("Loaded successfully: {} plugins", count),
+        Ok(count) => tracing::info!("Loaded successfully: {} plugins", count),
         Err(e) => {
-            eprintln!("Error loading plugins: {}", e);
+            tracing::error!("Error loading plugins: {}", e);
             return Err(1);
         }
     }
@@ -146,25 +157,27 @@ async fn run_cli(
     match backend.requires_authentication(&command) {
         Some(true) => {
             backend.authenticate().await.unwrap_or_else(|e| {
-                eprintln!("Authentication failed: {}", e);
+                tracing::error!("Authentication failed: {}", e);
                 std::process::exit(1);
             });
         },
         Some(false) => {}
         None => {
-            println!("Command undefined for authentication.");
-            println!("Executing command without authentication.");
+            tracing::warn!("Command undefined for authentication.");
+            tracing::info!("Executing command without authentication.");
         }
     }
-    
-    println!("Backend Created: {}", config.termail.default_backend);
+
+    tracing::debug!("Backend Created: {}", config.termail.default_backend);
     match backend.do_command(command, Some(plugin_manager)).await {
         Ok(result) => {
-            println!("RESULT:\n{}", result);
+            tracing::info!("RESULT:\n{}", result);
+            tracing::debug!("Command completed successfully");
             Ok(())
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            tracing::error!("Error: {}", e);
+            tracing::error!("Command failed: {}", e);
             Err(1)
         }
     }

@@ -12,6 +12,8 @@ use futures::future;
 use crate::plugins::plugins::{PluginManager};
 use crate::maildir::MaildirManager;
 
+const SYNC_SOURCE: &str = "INBOX";
+
 type GmailHub = Gmail<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 pub struct GmailBackend {
     oauth2_client_secret_file: Option<String>,
@@ -29,7 +31,7 @@ impl GmailBackend {
             filter_labels: config.filter_labels.clone(),
             editor,
             maildir_manager: MaildirManager::new(config.maildir_path.clone()).unwrap_or_else(|e| {
-                eprintln!("Failed to create maildir manager: {}", e);
+                tracing::error!("Failed to create maildir manager: {}", e);
                 std::process::exit(1);
             }),
         }
@@ -137,7 +139,7 @@ impl GmailBackend {
                         email_attachments: Vec::new(),
                     });
                 }
-                Err(e) => eprintln!("Failed to fetch message: {}", e),
+                Err(e) => tracing::error!("Failed to fetch message: {}", e),
             }
         }
         Ok(emails)
@@ -327,7 +329,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("INBOX")
+                .add_label_ids(SYNC_SOURCE)
                 .max_results(500);
             
             // add page token if it exists
@@ -464,7 +466,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("INBOX")
+                .add_label_ids(SYNC_SOURCE)
                 .max_results(500);
             
             // add page token if it exists
@@ -658,14 +660,14 @@ impl Backend for GmailBackend {
             Command::SyncFromCloud => {
                 
                 let last_sync_id = self.maildir_manager.get_last_sync_id();
-                println!("Last sync id: {:?}", last_sync_id);
+                tracing::info!("Last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 && !self.maildir_manager.has_synced_emails()? {
-                    println!("Last sync id is 0 and no emails have been synced yet, doing full sync");
+                    tracing::info!("Last sync id is 0 and no emails have been synced yet, doing full sync");
                     self.full_sync().await?;
-                    println!("Full sync completed");
+                    tracing::info!("Full sync completed");
                 } else {
-                    println!("Incrementing sync from last sync id: {:?}", last_sync_id);
+                    tracing::info!("Incrementing sync from last sync id: {:?}", last_sync_id);
                     self.incremental_sync(last_sync_id).await?;                    
                 }
 

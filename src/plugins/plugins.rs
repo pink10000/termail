@@ -203,7 +203,7 @@ impl PluginManager {
                 self.load_plugin(&plugin_dir, manifest)?;
                 loaded_plugins_count += 1;
             } else {
-                println!("Plugin {} is not enabled, skipping", manifest.name);
+                tracing::info!("Plugin {} is not enabled, skipping", manifest.name);
             }
         }
 
@@ -223,7 +223,7 @@ impl PluginManager {
         match manifest {
             Ok(m) => {
                 if m.backends.is_empty() {
-                    println!("Warning! Plugin {} has an empty \"backends\" field, and will NOT be loaded.", m.name);
+                    tracing::error!("Warning! Plugin {} has an empty \"backends\" field, and will NOT be loaded.", m.name);
                     return Ok(None);
                 }
                 return Ok(Some(m));
@@ -331,7 +331,7 @@ impl PluginManager {
                 .unwrap()
                 .remove(&invocation_id);
 
-            println!("[Host] Plugin {} processed event", plugin.name);
+            tracing::info!("[Host] Plugin {} processed event", plugin.name);
         }
 
         // Return the final content string

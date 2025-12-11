@@ -141,7 +141,7 @@ impl App {
                             // 5. Update state
                             match result {
                                 Ok(new_draft) => composer.draft = new_draft,
-                                Err(e) => eprintln!("Editor error: {}", e),
+                                Err(e) => tracing::error!("Editor error: {}", e),
                             }
                         }
                     },
@@ -158,7 +158,7 @@ impl App {
                         match result {
                             CommandResult::Empty => {
                                 // TODO: some kind of status bar / message? maybe use the bottom bar?
-                                println!("Email sent successfully!");
+                                tracing::info!("Email sent successfully!");
                             },
                             _ => return Err(Error::Other("Unexpected command result from send_email".to_string())),
                             
@@ -180,7 +180,7 @@ impl App {
                                     let _ = async_state.update_resized_protocol(response);
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to resize/encode image: {}", e);
+                                    tracing::error!("Failed to resize/encode image: {}", e);
                                 }
                             }
                         }
@@ -205,7 +205,7 @@ impl App {
         let picker = match Picker::from_query_stdio() {
             Ok(picker) => picker,
             Err(e) => {
-                eprintln!("Failed to initialize image picker: {}, using fallback", e);
+                tracing::error!("Failed to initialize image picker: {}, using fallback", e);
                 Picker::from_fontsize((8, 16))
             }
         };
@@ -223,7 +223,7 @@ impl App {
                     self.async_state = Some(ThreadProtocol::new(tx, Some(protocol)));
                 }
                 Err(e) => {
-                    eprintln!("Failed to decode image {}: {}", attachment.filename, e);
+                    tracing::error!("Failed to decode image {}: {}", attachment.filename, e);
                     self.async_state = None;
                 }
             }
@@ -273,7 +273,7 @@ impl App {
                         .await
                 }
                 Err(e) => {
-                    eprintln!("Failed to sync from cloud: {}", e);
+                    tracing::error!("Failed to sync from cloud: {}", e);
                     // bail out of this async task, return right away without refreshing the mailbox
                     return;
                 }
@@ -290,10 +290,10 @@ impl App {
                     let _ = sender.send(Event::App(AppEvent::EmailsFetched(vec![])));
                 }
                 Err(e) => {
-                    eprintln!("Failed to fetch emails: {}", e);
+                    tracing::error!("Failed to fetch emails: {}", e);
                 }
                 _ => {
-                    eprintln!("Unexpected command result from view_mailbox");
+                    tracing::error!("Unexpected command result from view_mailbox");
                 }
             }
         });
@@ -330,10 +330,10 @@ impl App {
                     let _ = sender.send(Event::App(AppEvent::EmailsFetched(vec![])));
                 }
                 Err(e) => {
-                    eprintln!("Failed to fetch emails: {}", e);
+                    tracing::error!("Failed to fetch emails: {}", e);
                 }
                 _ => {
-                    eprintln!("Unexpected command result from view_mailbox");
+                    tracing::error!("Unexpected command result from view_mailbox");
                 }
             }
         });
@@ -353,10 +353,8 @@ impl App {
                 Ok(CommandResult::Labels(labels)) => {
                     let _ = sender.send(Event::App(AppEvent::LabelsFetched(labels)));
                 }
-                Err(e) => {
-                    eprintln!("Failed to fetch labels: {}", e);
-                },
-                _ => eprintln!("Unexpected command result from list_labels"),
+                Err(e) => tracing::error!("Failed to fetch labels: {}", e),
+                _ => tracing::error!("Unexpected command result from list_labels"),
             }
         });
     }
