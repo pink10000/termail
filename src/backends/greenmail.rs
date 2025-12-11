@@ -186,7 +186,7 @@ impl GreenmailBackend {
             backend: "greenmail".to_string(),
                 feature: "list_labels".to_string(),
             });
-    }  
+    }
 
     /// Greenmail (or the library?) parses emails in a weird way. This method provides a layer to our
     /// `EmailMessage` type api.

@@ -8,33 +8,19 @@ use crate::error::Error;
 use std::path::PathBuf;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-#[derive(Debug)]
-pub enum LogLevel {
-    Info,
-    Debug,
-    Error,
-}
-
-impl std::fmt::Display for LogLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<u8> for LogLevel {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => LogLevel::Info,
-            1 => LogLevel::Debug,
-            2 => LogLevel::Error,
-            _ => LogLevel::Error,
-        }
+/// Converts verbosity count to log level string
+fn verbosity_to_level(verbosity: u8) -> &'static str {
+    match verbosity {
+        0 => "error",  // No -v flags: only errors
+        1 => "info",   // -v: info and above
+        2 => "debug",  // -vv: debug and above
+        _ => "trace",  // -vvv or more: everything
     }
 }
 
 /// Initialize the tracing logger with appropriate output based on mode
 pub fn init_logger(is_tui: bool, verbosity: u8, log_path: PathBuf) -> Result<(), Error> {
-    let log_level = LogLevel::from(verbosity);
+    let log_level = verbosity_to_level(verbosity);
 
     // Create the log directory if it doesn't exist
     if let Some(parent) = log_path.parent() {
@@ -50,7 +36,7 @@ pub fn init_logger(is_tui: bool, verbosity: u8, log_path: PathBuf) -> Result<(),
     );
 
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(log_level.to_string()));
+        .unwrap_or_else(|_| EnvFilter::new(log_level));
 
     if is_tui {
         // TUI mode: Only log to file to avoid corrupting the terminal UI

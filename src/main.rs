@@ -60,15 +60,17 @@ pub struct Args {
 async fn main() {
     let args = Args::parse();
     let mut config = Config::load(args.config_file.clone()).unwrap_or_else(|e| {
-        tracing::error!("Error loading config: {}", e);
+        eprintln!("Error loading config: {}", e);
         std::process::exit(1);
     });
     config.merge(&args);
 
-    if let Err(e) = logger::init_logger(config.termail.cli, args.verbosity.unwrap_or(0), config.get_log_path()) {
-        tracing::error!("Error initializing logger: {}", e);
+    if let Err(e) = logger::init_logger(!config.termail.cli, args.verbosity.unwrap_or(0), config.get_log_path()) {
+        eprintln!("Error initializing logger: {}", e);
         std::process::exit(1);
     }
+
+    tracing::info!("Logger initialized at {:?}", config.get_log_path());
 
     let mut plugin_manager = PluginManager::new().unwrap();
     let enabled_plugins = config.termail.plugins.clone();
@@ -161,19 +163,21 @@ async fn run_cli(
         },
         Some(false) => {}
         None => {
-            tracing::error!("Command undefined for authentication.");
+            tracing::warn!("Command undefined for authentication.");
             tracing::info!("Executing command without authentication.");
         }
     }
 
-    tracing::info!("Backend Created: {}", config.termail.default_backend);
+    tracing::debug!("Backend Created: {}", config.termail.default_backend);
     match backend.do_command(command, Some(plugin_manager)).await {
         Ok(result) => {
             tracing::info!("RESULT:\n{}", result);
+            tracing::debug!("Command completed successfully");
             Ok(())
         }
         Err(e) => {
             tracing::error!("Error: {}", e);
+            tracing::error!("Command failed: {}", e);
             Err(1)
         }
     }
