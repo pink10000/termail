@@ -36,6 +36,7 @@ fn strip_emojis(text: &str) -> String {
 
 /// Truncate and pad string to exact visual width (handles emojis)
 fn fit_to_width(text: &str, target_width: usize) -> String {
+    let text = text.trim_start();
     let mut result = String::new();
     let mut current_width = 0;
 

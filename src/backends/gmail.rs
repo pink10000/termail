@@ -197,7 +197,6 @@ impl GmailBackend {
     }
 
     async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
-        // println!("Starting incremental sync");
         let result = self.hub.as_ref().unwrap()
             .users()
             .history_list("me")
@@ -233,7 +232,6 @@ impl GmailBackend {
 
         // create a map of message id to action that was taken and we overwrite if there are multiple actions for the same message since records are in chronological order
         let mut message_id_to_action: HashMap<String, String> = HashMap::new();
-
 
         for history_record in history_records.1.history.unwrap() {
             if history_record.labels_added.is_some() {
@@ -284,18 +282,15 @@ impl GmailBackend {
         // do the right thing based on the action
         for (message_id, action) in message_id_to_action.iter() {
             // get maildir id from map
-            
+            tracing::debug!("message_id: {}, action: {}", message_id, action);
             let maildir_id = mapping.get(message_id).unwrap();
             
             match action.as_str() {
                 "delete" => {
-                    // delete message from maildir using maildir_id
                     self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
-                    // remove mapping from db
                     self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
                 }
                 "move_to_new" => {
-                    // move message to new in maildir
                     self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
                 }
                 "move_to_cur" => {
