@@ -1,10 +1,12 @@
 use ratatui::{
-    buffer::Buffer, 
-    layout::Rect, 
-    style::{Color, Modifier, Style}, 
-    text::{Line, Span}, 
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Widget}
 };
+use chrono::DateTime;
+use unicode_width::UnicodeWidthChar;
 
 use crate::{
     core::email::EmailMessage,
@@ -17,8 +19,48 @@ pub struct Inbox<'a> {
     pub state: &'a BaseViewState,
 }
 
+/// Formats a date string to MM/DD/YYYY format
+/// TODO: Support other date formats. They should be defined in the config.toml file.
+fn format_date(date_str: &str) -> String {
+    DateTime::parse_from_rfc2822(date_str)
+        .map(|dt| dt.format("%m/%d/%Y").to_string())
+        .unwrap_or_else(|_| "??/??/????".to_string())
+}
+
+/// Strip emojis and other wide characters from text
+fn strip_emojis(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.width().unwrap_or(1) <= 1)
+        .collect()
+}
+
+/// Truncate and pad string to exact visual width (handles emojis)
+fn fit_to_width(text: &str, target_width: usize) -> String {
+    let mut result = String::new();
+    let mut current_width = 0;
+
+    for ch in text.chars() {
+        // This is where `unicode_width::UnicodeWidthChar` is used.
+        let ch_width = ch.width().unwrap_or(0);
+        if current_width + ch_width > target_width {
+            break;
+        }
+        result.push(ch);
+        current_width += ch_width;
+    }
+
+    // Pad to exact width
+    if current_width < target_width {
+        result.push_str(&" ".repeat(target_width - current_width));
+    }
+    result
+}
+
 impl<'a> Widget for Inbox<'a> {
     /// Renders the Inbox view of the BaseView state.
+    ///
+    /// The email subjects have their emojis strip. In the future, we will
+    /// support displaying emojis in the subject.
     fn render(self, area: Rect, buf: &mut Buffer) {
         let is_active = matches!(self.state, BaseViewState::Inbox);
         
@@ -32,10 +74,13 @@ impl<'a> Widget for Inbox<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::White));
-        
+
         let width = area.width as usize;
-        let from_max_length: usize = 20;
-        let _subject_max_length: usize = width.saturating_sub(from_max_length + 2); // +2 for "> " prefix
+        let from_max_width: usize = 20;
+        let date_width: usize = 10 + 1; // MM/DD/YYYY = 10 chars + 1 space (see format_date function)
+        let spacing: usize = 2; // spaces between columns
+        // Calculate remaining space for subject (accounting for highlight symbol "▶ " = 2 chars)
+        let subject_width: usize = width.saturating_sub(from_max_width + date_width + (spacing * 2) + 2);
     
         // Create list items (each email = one row)
         let items: Vec<ListItem> = match &self.emails {
@@ -44,14 +89,18 @@ impl<'a> Widget for Inbox<'a> {
             Some(emails) => emails
                 .iter()
                 .map(|email| {
-                    let from = &email.from;
-                    let subject = &email.subject;
-                    let line = Line::from(vec![
-                        Span::styled(format!("{:<25.25}", from), Style::default().fg(Color::Cyan)),
-                        Span::raw(" "),
+                    let from = fit_to_width(email.from.display_name(), from_max_width);
+                    let subject = fit_to_width(&strip_emojis(&email.subject), subject_width);
+                    let date = format_date(&email.date);
+
+                    ListItem::new(Line::from(vec![
+                        Span::styled(from, Style::default().fg(Color::Cyan)),
+                        Span::raw(" "), // space between from and subject
                         Span::styled(subject, Style::default().fg(Color::White)),
-                    ]);
-                    ListItem::new(line)
+                        Span::raw(" "), // space between subject and date
+                        Span::styled(format!("{:>width$}", date, width = date_width), Style::default().fg(Color::Green)),
+                        Span::raw(" "), // space between date and border
+                    ]))
                 })
                 .collect(),
         };
