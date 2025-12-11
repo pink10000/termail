@@ -3552,6 +3552,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "cap-std",
+ "chrono",
  "clap",
  "crossterm 0.29.0",
  "dirs",

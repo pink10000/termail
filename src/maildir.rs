@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use chrono::DateTime;
 
 
 pub struct MaildirManager {
@@ -74,6 +75,26 @@ impl MaildirManager {
             [],
         )
         .map_err(|e| Error::Other(format!("Failed to create message_map table: {}", e)))?;
+
+        // Metadata for the emails in the maildir
+        // In particular, we want to be able to sort the emails by date (newest first)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS message_metadata (
+                maildir_id TEXT PRIMARY KEY,
+                date_timestamp INTEGER NOT NULL,
+                subject TEXT,
+                sender TEXT
+            )",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to create message_metadata table: {}", e)))?;
+
+        // Index on date_timestamp for fast sorting
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_date_timestamp ON message_metadata(date_timestamp DESC)",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to create date index: {}", e)))?;
 
         Ok(())
     }
@@ -207,6 +228,59 @@ impl MaildirManager {
         Ok(())
     }
 
+    /// Save or update metadata for an email
+    pub fn save_metadata(&self, maildir_id: &str, date_str: &str, subject: &str, sender: &str) -> Result<(), Error> {
+        let date_timestamp = DateTime::parse_from_rfc2822(date_str)
+            .map(|dt| dt.timestamp())
+            .map_err(|e| Error::Other(format!("Failed to parse date: {}", e)))?;
+
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock connection: {}", e)))?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO message_metadata (maildir_id, date_timestamp, subject, sender) VALUES (?1, ?2, ?3, ?4)",
+            params![maildir_id, date_timestamp, subject, sender],
+        ).map_err(|e| Error::Other(format!("Failed to save metadata: {}", e)))?;
+
+        tracing::debug!("Saved metadata for {}: {} (timestamp: {})", maildir_id, subject, date_timestamp);
+        Ok(())
+    }
+
+    /// Get sorted maildir_ids from metadata (newest first)
+    pub fn get_sorted_maildir_ids(&self, limit: usize) -> Result<Vec<String>, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock connection: {}", e)))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT maildir_id FROM message_metadata ORDER BY date_timestamp DESC LIMIT ?1"
+        ).map_err(|e| Error::Other(format!("Failed to prepare metadata query: {}", e)))?;
+
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            let maildir_id: String = row.get(0)?;
+            Ok(maildir_id)
+        }).map_err(|e| Error::Other(format!("Failed to query metadata: {}", e)))?;
+
+        let maildir_ids = rows
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| Error::Other(format!("Failed to collect results: {}", e)))?;
+        Ok(maildir_ids)
+    }
+
+    // Check if metadata exists for a maildir_id
+    pub fn has_metadata(&self, maildir_id: &str) -> bool {
+        let conn = match self.connection.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        conn.query_row(
+            "SELECT 1 FROM message_metadata WHERE maildir_id = ?1",
+            params![maildir_id],
+            |_| Ok(()),
+        )
+        .is_ok()
+    }
+
     pub fn delete_message(&self, maildir_id: String) -> Result<(), Error> {
         
         // delete message from maildir
@@ -256,21 +330,39 @@ impl MaildirManager {
         }
     }
 
-    // save message to maildir
+    /// Save message to maildir
     pub fn save_message(&self, message: &Message, maildir_subdir: String) -> Result<String, Error> {
 
         let raw_content = message.raw.clone().unwrap();
-        
-        // save message to correct maildir subdirectory
-        if maildir_subdir == "cur" {
-            return self.maildir.store_cur_with_flags(&raw_content, "")
-                .map_err(|e| Error::Other(format!("Failed to store message in cur: {}", e)));
+
+        // Store message to correct maildir subdirectory
+        let maildir_id = if maildir_subdir == "cur" {
+            self.maildir.store_cur_with_flags(&raw_content, "")
+                .map_err(|e| Error::Other(format!("Failed to store message in cur: {}", e)))?
         } else if maildir_subdir == "new" {
-            return self.maildir.store_new(&raw_content)
-                .map_err(|e| Error::Other(format!("Failed to store message in new: {}", e)));
+            self.maildir.store_new(&raw_content)
+                .map_err(|e| Error::Other(format!("Failed to store message in new: {}", e)))?
         } else {
             return Err(Error::Other(format!("Invalid maildir subdirectory: {}", maildir_subdir)));
+        };
+
+        // Parse the message to extract metadata and save it to the database cache
+        match parse_mail(&raw_content) {
+            Ok(parsed) => {
+                let date = parsed.headers.get_first_value("Date").unwrap_or_default();
+                let subject = parsed.headers.get_first_value("Subject").unwrap_or_default();
+                let from = parsed.headers.get_first_value("From").unwrap_or_default();
+
+                if let Err(e) = self.save_metadata(&maildir_id, &date, &subject, &from) {
+                    tracing::warn!("Failed to save metadata for {}: {}", maildir_id, e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to parse email for metadata extraction: {}", e);
+            }
         }
+
+        Ok(maildir_id)
     }
 
     /// Parses an RFC822 email format into termail's EmailMessage struct using the `mailparse` crate.
@@ -370,16 +462,50 @@ impl MaildirManager {
 
     // list all emails from maildir (both new and cur directories)
     pub fn list_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
-        let mut emails = Vec::new();
         let maildir_path = self.maildir.path();
 
-        // collect entries from both new and cur directories
+        // Try to use database cache first for fast sorted results
+        let sorted_ids = self.get_sorted_maildir_ids(count)?;
+        if !sorted_ids.is_empty() {
+            tracing::debug!("Using cached metadata for {} emails", sorted_ids.len());
+            // Load emails using the sorted IDs from cache
+            let mut emails = Vec::new();
+            for maildir_id in sorted_ids {
+                // Try both new and cur directories
+                let paths = [
+                    maildir_path.join("new").join(&maildir_id),
+                    maildir_path.join("cur").join(&maildir_id),
+                ];
+
+                for path in &paths {
+                    if path.exists() {
+                        let raw_content = std::fs::read(path)
+                            .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
+
+                        match self.parse_rfc822_email(&raw_content, maildir_id.clone()) {
+                            Ok(email) => {
+                                emails.push(email);
+                                break; // Found it, move to next ID
+                            }
+                            Err(e) => tracing::warn!("Failed to parse email {}: {}", maildir_id, e),
+                        }
+                    }
+                }
+            }
+
+            tracing::debug!("Loaded {} emails from cache", emails.len());
+            return Ok(emails);
+        }
+
+        // Fallback: No cache available, scan filesystem and rebuild cache
+        tracing::info!("No metadata cache found, scanning filesystem and building cache");
+
+        // Collect entries from both new and cur directories
         let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
 
-        // read from "new" directory (unread messages)
+        // Read from "new" directory (unread messages)
         let new_dir = maildir_path.join("new");
         if new_dir.exists() {
-            
             let new_entries = std::fs::read_dir(&new_dir)
                 .map_err(|e| Error::Other(format!("Failed to read new directory: {}", e)))?;
 
@@ -396,10 +522,9 @@ impl MaildirManager {
             }
         }
 
-        // read from "cur" directory (read messages)
+        // Read from "cur" directory (read messages)
         let cur_dir = maildir_path.join("cur");
         if cur_dir.exists() {
-
             let cur_entries = std::fs::read_dir(&cur_dir)
                 .map_err(|e| Error::Other(format!("Failed to read cur directory: {}", e)))?;
 
@@ -416,23 +541,45 @@ impl MaildirManager {
             }
         }
 
-        // sort by filename (which contains timestamp) - newest first (ascending order)
-        // TODO: make a flag to sort by oldest first (descending order)
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        tracing::debug!("Found {} emails in maildir", entries.len());
 
-        // take only the requested count
-        for (maildir_id, path) in entries.into_iter().take(count) {
-            // If we want to do actions from the TUI (delete, mark as read, archive, add label) then we will need to transalte maildir_id -> gmail_id
+        // Parse all emails and save metadata to database
+        let mut emails: Vec<EmailMessage> = Vec::new();
+        for (maildir_id, path) in entries {
             let maildir_id_clone = maildir_id.clone();
             let raw_content = std::fs::read(&path)
                 .map_err(|e| Error::Other(format!("Failed to read maildir entry {}: {}", maildir_id_clone, e)))?;
 
-            match self.parse_rfc822_email(&raw_content, maildir_id) {
-                Ok(email) => emails.push(email),
-                Err(e) => eprintln!("Failed to parse email: {}", e),
+            match self.parse_rfc822_email(&raw_content, maildir_id.clone()) {
+                Ok(email) => {
+                    // Save metadata to cache for future use
+                    if let Err(e) = self.save_metadata(&maildir_id, &email.date, &email.subject, &email.from.email) {
+                        tracing::warn!("Failed to save metadata for {}: {}", maildir_id, e);
+                    }
+                    emails.push(email);
+                },
+                Err(e) => tracing::warn!("Failed to parse email: {}", e),
             }
         }
 
+        // Sort by email date (parsed from Date header) in descending order (newest first)
+        emails.sort_by(|a, b| {
+            let date_a = DateTime::parse_from_rfc2822(&a.date).ok();
+            let date_b = DateTime::parse_from_rfc2822(&b.date).ok();
+            date_b.cmp(&date_a) // Reverse for descending order (newest first)
+        });
+        
+        tracing::info!("Built metadata cache for {} emails", emails.len());
+        
+        // Debug: log first few email dates to verify sort order
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            for (i, email) in emails.iter().take(3).enumerate() {
+                tracing::debug!("Email {}: {} - {}", i, email.subject, email.date);
+            }
+        }
+
+        // Take only the requested count
+        emails.truncate(count);
         Ok(emails)
     }
 
