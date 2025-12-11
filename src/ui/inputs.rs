@@ -50,24 +50,10 @@ impl App {
                     .and_then(|index| self.emails.as_ref()?.get(index))
                     .cloned()
                     .unwrap_or_else(EmailMessage::new);
-                
-                let (term_w, _) = ratatui::crossterm::terminal::size().unwrap();
-
-                // Since we're using the terminal as the height, we will overcount a couple of lines
-                // due to the rendering of the top bar. However, since the top bar is 3 lines, this 
-                // discrepancy is acceptable.
-                //
-                // For each `\n`, we get at least one line. For each word, we divide the words into chunks of the max width,
-                // and add the number of chunks - 1 to the line count.
-                let content_height = selected_email.body
-                    .lines()
-                    .map(|line| line.chars().count() / term_w as usize + 1) // +1 for the \n
-                    .sum::<usize>() as u16;
-
                 // Initialize image protocol if email has images
                 self.init_image_protocol_for_email(&selected_email);
 
-                self.state = ActiveViewState::MessageView(Messager::new(selected_email, content_height));
+                self.state = ActiveViewState::MessageView(Messager::new(selected_email));
             }
             _ => {}
         }
@@ -102,10 +88,14 @@ impl App {
     /// 
     /// Supports scrolling through the message body.
     fn handle_message_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
+        let messager = match &mut self.state {
+            ActiveViewState::MessageView(messager) => messager,
+            _ => unreachable!("Not in message view"),
+        };
         match key_event.code {
             KeyCode::Esc => self.state = ActiveViewState::BaseView(BaseViewState::Inbox),
-            KeyCode::Down => self.change_scroll(1)?,
-            KeyCode::Up => self.change_scroll(-1)?,
+            KeyCode::Down => messager.scroll_down(),
+            KeyCode::Up => messager.scroll_up(),
             _ => {}
         }
         Ok(())
@@ -195,35 +185,6 @@ impl App {
                 self.state = ActiveViewState::BaseView(BaseViewState::Inbox);
             }
             _ => {}
-        }
-        Ok(())
-    }
-
-    /// This function changes the scroll offset of the MessageViewState
-    /// Since ratatui's `Paragraph` widget does not limit how far we can scroll down, 
-    /// scroll down, we need to use the height of the Paragraph widget.
-    /// 
-    /// Note that the value 15 is arbitrary, and can be changed to any value.
-    /// TODO: Make this configurable by the config.toml file OR a way to determine
-    /// the height without knowing the UI layout.
-    /// 
-    /// Note that the `content_height` is estimated, and may not be exact. See the
-    /// comment about using `term_w` in `handle_base_view()` for more details.
-    /// Ideally, this value is determined by the height of the AppLayouts.middle
-    /// rectangle, but its implementation would remove the separations of concerns
-    /// as the App State would require the knowledge of the UI layout, which already
-    /// requires knowledge of the App State. So for now, we'll just do a rough estimate.
-    pub fn change_scroll(&mut self, amount: i16) -> Result<(), Error> {
-        let view_state = match &mut self.state {
-            ActiveViewState::MessageView(view_state) => view_state,
-            _ => return Err(Error::Other("Not in message view".to_string())),
-        };
-        let overflow = 15;
-        let max_scroll = view_state.content_height.saturating_sub(overflow);
-        if amount > 0 {
-            view_state.scroll = view_state.scroll.saturating_add(1).clamp(0, max_scroll);
-        } else {
-            view_state.scroll = view_state.scroll.saturating_sub(1).clamp(0, max_scroll);
         }
         Ok(())
     }

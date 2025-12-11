@@ -63,14 +63,14 @@ pub struct App {
 
 impl App {
     pub fn new(
-        config: Config, 
+        config: Config,
         backend: Box<dyn Backend>,
         plugin_manager: PluginManager,
     ) -> Self {
         let backend = Arc::new(Mutex::new(backend));
         let plugin_manager = Arc::new(Mutex::new(plugin_manager));
         let events = EventHandler::new();
-        
+
         // Spawn initial label fetch
         Self::spawn_label_fetch(
             Arc::clone(&backend),
@@ -187,7 +187,7 @@ impl App {
                     }
                 }
             }
-        }        
+        }
         Ok(())
     }
 
@@ -214,11 +214,6 @@ impl App {
         if let Some(attachment) = image_attachments.first() {
             match image::load_from_memory(&attachment.data) {
                 Ok(dyn_img) => {
-                    eprintln!("Successfully decoded image: {} ({}x{})",
-                             attachment.filename,
-                             dyn_img.width(),
-                             dyn_img.height());
-
                     // Handler for image resizing. In particular, resizing is just the process of adapting an image
                     // to fit to the terminal area while encoding it. Stateful widgets like StatefulImage need to be
                     // able to adapt to the terminal area dynamically.
@@ -226,8 +221,6 @@ impl App {
                     let protocol = picker.new_resize_protocol(dyn_img);
                     // Store in app state
                     self.async_state = Some(ThreadProtocol::new(tx, Some(protocol)));
-
-                    eprintln!("Image protocol initialized successfully");
                 }
                 Err(e) => {
                     eprintln!("Failed to decode image {}: {}", attachment.filename, e);
@@ -238,15 +231,15 @@ impl App {
     }
 
     /// Handles the tick event of the terminal.
-    /// 
+    ///
     /// Anything that requires a fixed framerate will be put here.
     /// Also handles periodic email refresh (every 120 seconds).
     pub fn tick(&mut self) {
         self.tick_counter += 1;
-        
+
         // Refresh emails every 120 seconds (30 FPS * 120 seconds = 3600 ticks)
         const REFRESH_INTERVAL: u64 = 3600;
-        
+
         if self.tick_counter % REFRESH_INTERVAL == 0 {
             Self::spawn_email_fetch(
                 Arc::clone(&self.backend),
