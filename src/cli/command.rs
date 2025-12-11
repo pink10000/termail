@@ -33,6 +33,9 @@ pub enum Command {
         /// Number of emails to view (default: 1)
         #[arg(default_value_t = 1)]
         count: usize,
+        /// Optional label name to filter emails by
+        #[arg(long)]
+        label: Option<String>,
     },
 
     /// Null command (used for testing plugins))

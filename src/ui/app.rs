@@ -82,6 +82,7 @@ impl App {
             Arc::clone(&backend),
             events.get_sender(),
             config.termail.email_fetch_count,
+            None,
         );
 
         Self { 
@@ -166,10 +167,30 @@ impl App {
                     }
                     AppEvent::SyncFromCloud => {
                         // same here can add status bar to show sync progress
+                        let label = if self.selected_folder == "INBOX" {
+                            None
+                        } else {
+                            Some(self.selected_folder.clone())
+                        };
                         Self::spawn_sync_from_cloud(
                             Arc::clone(&self.backend),
                             self.events.get_sender(),
                             self.config.termail.email_fetch_count,
+                            label,
+                        );
+                    },
+                    AppEvent::FolderChanged => {
+                        // Refresh emails when folder selection changes
+                        let label = if self.selected_folder == "INBOX" {
+                            None
+                        } else {
+                            Some(self.selected_folder.clone())
+                        };
+                        Self::spawn_email_fetch(
+                            Arc::clone(&self.backend),
+                            self.events.get_sender(),
+                            self.config.termail.email_fetch_count,
+                            label,
                         );
                     },
                     AppEvent::ImageResizeRequest(request) => {
@@ -241,10 +262,17 @@ impl App {
         const REFRESH_INTERVAL: u64 = 3600;
 
         if self.tick_counter % REFRESH_INTERVAL == 0 {
+            // Refresh with current selected folder
+            let label = if self.selected_folder == "INBOX" {
+                None
+            } else {
+                Some(self.selected_folder.clone())
+            };
             Self::spawn_email_fetch(
                 Arc::clone(&self.backend),
                 self.events.get_sender(),
                 self.config.termail.email_fetch_count,
+                label,
             );
         }
     }
@@ -255,6 +283,7 @@ impl App {
         backend: Arc<Mutex<Box<dyn Backend>>>,
         sender: tokio::sync::mpsc::UnboundedSender<Event>,
         count: usize,
+        label: Option<String>,
     ) {
         tokio::spawn(async move {
             // start by syncing from cloud
@@ -269,7 +298,7 @@ impl App {
                     // after sync finishes, refresh the mailbox with view_mailbox
                     let backend_guard = backend.lock().await;
                     backend_guard
-                        .do_command(Command::ViewMailbox { count }, None)
+                        .do_command(Command::ViewMailbox { count, label }, None)
                         .await
                 }
                 Err(e) => {
@@ -306,16 +335,18 @@ impl App {
     /// * `backend` - Arc-wrapped backend for thread-safe access
     /// * `sender` - Event sender to send results back
     /// * `count` - Number of emails to fetch
+    /// * `label` - Optional label name to filter emails by
     fn spawn_email_fetch(
         backend: Arc<Mutex<Box<dyn Backend>>>,
         sender: tokio::sync::mpsc::UnboundedSender<Event>,
         count: usize,
+        label: Option<String>,
     ) {
         tokio::spawn(async move {
             // Acquire lock and fetch emails from maildir (no plugin manager needed for basic fetch)
             let result = {
                 let backend_guard = backend.lock().await;
-                backend_guard.do_command(Command::ViewMailbox { count }, None).await
+                backend_guard.do_command(Command::ViewMailbox { count, label }, None).await
                 // backend_guard.do_command(Command::FetchInbox { count }, None).await
             };
             

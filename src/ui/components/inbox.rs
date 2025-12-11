@@ -46,10 +46,24 @@ impl<'a> Widget for Inbox<'a> {
                 .map(|email| {
                     let from = &email.from;
                     let subject = &email.subject;
+                    
+                    // Style unread emails: white and bold, read emails: dark gray
+                    let from_style = if email.is_unread {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    
+                    let subject_style = if email.is_unread {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    
                     let line = Line::from(vec![
-                        Span::styled(format!("{:<25.25}", from), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{:<25.25}", from), from_style),
                         Span::raw(" "),
-                        Span::styled(subject, Style::default().fg(Color::White)),
+                        Span::styled(subject, subject_style),
                     ]);
                     ListItem::new(line)
                 })
@@ -62,7 +76,7 @@ impl<'a> Widget for Inbox<'a> {
             .highlight_style(
                 Style::default()
                     .fg(Color::Yellow)
-                    .bg(if is_active { Color::Blue } else { Color::DarkGray })
+                    .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
             );
     

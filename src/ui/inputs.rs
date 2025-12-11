@@ -133,7 +133,11 @@ impl App {
 
         let new_label_idx = selectable_indices[new_position as usize];
         if let Some(name) = labels[new_label_idx].name.clone() {
-            self.selected_folder = name;
+            if name != self.selected_folder {
+                self.selected_folder = name;
+                // Trigger email refresh when folder changes
+                self.events.send(AppEvent::FolderChanged);
+            }
         }
     }
 

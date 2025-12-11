@@ -137,6 +137,7 @@ impl GmailBackend {
                         body,
                         mime_type,
                         email_attachments: Vec::new(),
+                        is_unread: false,
                     });
                 }
                 Err(e) => tracing::error!("Failed to fetch message: {}", e),
@@ -148,9 +149,9 @@ impl GmailBackend {
     /// Views emails from the local maildir (reads from synced emails).
     /// 
     /// Emails are read from the maildir directory where they were synced from Gmail.
-    async fn view_mailbox(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
-        // Read emails from maildir
-        let emails = self.maildir_manager.list_emails(count)?;
+    async fn view_mailbox(&self, count: usize, label: Option<&str>) -> Result<Vec<EmailMessage>, Error> {
+        // Read emails from maildir, optionally filtered by label
+        let emails = self.maildir_manager.list_emails_by_label(count, label)?;
         
         if emails.is_empty() {
             return Ok(Vec::new());
@@ -238,7 +239,6 @@ impl GmailBackend {
         for history_record in history_records.1.history.unwrap() {
             if history_record.labels_added.is_some() {
 
-                // if record was added Trash label then we delete from maildir
                 // if record was added Unread label then we move to new in maildir
                 for label in history_record.labels_added.unwrap() {
 
@@ -248,11 +248,7 @@ impl GmailBackend {
 
                         let gmail_id = label.message.unwrap().id.unwrap();
                         message_id_to_action.insert(gmail_id.to_string(), "move_to_new".to_string());
-                    } else if labels.contains(&"TRASH".to_string()) {
-                        
-                        let gmail_id = label.message.unwrap().id.unwrap();
-                        message_id_to_action.insert(gmail_id.to_string(), "delete".to_string());
-                    }
+                    } 
                 }
             } else if history_record.labels_removed.is_some() {
 
@@ -288,22 +284,48 @@ impl GmailBackend {
             let maildir_id = mapping.get(message_id).unwrap();
             
             match action.as_str() {
-                "delete" => {
-                    // delete message from maildir using maildir_id
-                    self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
-                    // remove mapping from db
-                    self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
-                }
                 "move_to_new" => {
-                    // move message to new in maildir
-                    self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                    // move message from cur to new in maildir (email was marked as unread)
+                    let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id)?;
+                    
+                    // Remove label mappings from old maildir_id FIRST (before updating message_map due to foreign key constraint)
+                    self.maildir_manager.remove_label_mappings(&[maildir_id.clone()])?;
+                    
+                    // Update message_map: remove old mapping and add new one
+                    self.maildir_manager.remove_mappings(&[message_id.clone()])?;
+                    self.maildir_manager.add_mapping(message_id.clone(), new_maildir_id.clone())?;
+                    
+                    // Fetch current labels from Gmail and add to new maildir_id
+                    let metadata_response = self.hub.as_ref().unwrap()
+                        .users()
+                        .messages_get("me", message_id.as_str())
+                        .format("metadata")
+                        .doit()
+                        .await
+                        .map_err(|e| Error::Connection(format!("Failed to fetch message metadata: {}", e)))?;
+                    let mut labels: Vec<String> = metadata_response.1.label_ids.clone().unwrap_or_default();
+                    // Ensure UNREAD label is present (Gmail should include it, but be explicit)
+                    if !labels.contains(&"UNREAD".to_string()) {
+                        labels.push("UNREAD".to_string());
+                    }
+                    self.maildir_manager.add_label_mappings(&new_maildir_id, &labels)?;
                 }
                 "move_to_cur" => {
-                    // move message to cur in maildir
-                    let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
-                    // need to update mapping in db since maildir changes id since we are doing a manual move
-                    self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
-                    self.maildir_manager.add_mapping(message_id.clone(), new_maildir_id).unwrap();
+                    // move message from new to cur in maildir (email was marked as read)
+                    self.maildir_manager.maildir_move_new_to_cur(&maildir_id)?;
+                    
+                    // Update label mappings: remove UNREAD label
+                    self.maildir_manager.remove_label_mappings(&[maildir_id.clone()])?;
+                    // Fetch current labels from Gmail to update all labels
+                    let metadata_response = self.hub.as_ref().unwrap()
+                        .users()
+                        .messages_get("me", message_id.as_str())
+                        .format("metadata")
+                        .doit()
+                        .await
+                        .map_err(|e| Error::Connection(format!("Failed to fetch message metadata: {}", e)))?;
+                    let labels: Vec<String> = metadata_response.1.label_ids.clone().unwrap_or_default();
+                    self.maildir_manager.add_label_mappings(&maildir_id, &labels)?;
                 }
                 _ => {
                     return Err(Error::Other(format!("Invalid action: {}", action)));
@@ -382,13 +404,15 @@ impl GmailBackend {
             
             match message_response {
                 Ok(message) => {
+
+                    let labels: Vec<String> = message.1.label_ids.clone().unwrap_or_default();
                     
                     // Save message to correct maildir subdirectory
                     let maildir_id: String;
-                        if message.1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string()) {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
+                        if labels.contains(&"UNREAD".to_string()) {
+                            maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string(), &labels).unwrap();
                         } else {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
+                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string(), &labels).unwrap();
                         } 
 
                     // add mapping to db
@@ -408,6 +432,8 @@ impl GmailBackend {
             self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
             // remove mapping from db
             self.maildir_manager.remove_mappings(&[gmail_id.clone()]).unwrap();
+            // remove label mappings from db
+            self.maildir_manager.remove_label_mappings(&[maildir_id.clone()]).unwrap();
         }
         
         // Update existing messagse if needed
@@ -423,6 +449,13 @@ impl GmailBackend {
 
             // get maildir id form gmail id
             let maildir_id = mapping.get(&gmail_id).unwrap();
+
+
+            // remove old label mappings from db
+            self.maildir_manager.remove_label_mappings(&[maildir_id.clone()])?;
+            // add new label mappings to db
+            let new_labels: Vec<String> = metadata_response.as_ref().unwrap().1.label_ids.clone().unwrap_or_default();
+            self.maildir_manager.add_label_mappings(&maildir_id, &new_labels)?;
 
             // figure out if message is read or unread
             let is_read = !metadata_response.unwrap().1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string());
@@ -458,6 +491,7 @@ impl GmailBackend {
 
     async fn full_sync(&self) -> Result<(), Error> {
         // println!("Starting full sync");
+        // println!("SYNC_SOURCE: {:?}", SYNC_SOURCE);
         // TODO: can later get progress to show easily later
         let mut page_token: Option<String> = None;
 
@@ -498,17 +532,16 @@ impl GmailBackend {
                 match message_response {
                     Ok(message) => {
 
+                        let labels: Vec<String> = message.1.label_ids.clone().unwrap_or_default();
+            
                         // Save message to correct maildir subdirectory
                         // message will either have label READ or UNREAD
-                        let maildir_id: String;
                         if message.1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string()) {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "new".to_string()).unwrap();
+                            self.maildir_manager.save_message(&message.1, "new".to_string(), &labels).unwrap();
                         } else {
-                            maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
+                            self.maildir_manager.save_message(&message.1, "cur".to_string(), &labels).unwrap();
                         } 
 
-                        // add mapping to db
-                        self.maildir_manager.add_mapping(message.1.id.unwrap().clone(), maildir_id).unwrap();
                     }
                     Err(e) => {
                         return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
@@ -673,8 +706,9 @@ impl Backend for GmailBackend {
 
                 Ok(CommandResult::Empty)
             },
-            Command::ViewMailbox { count } => {
-                let emails = self.view_mailbox(count).await.unwrap();
+            Command::ViewMailbox { count, label } => {
+                let label_ref = label.as_deref();
+                let emails = self.view_mailbox(count, label_ref).await.unwrap();
                 // filter emails to the ones that only have image attachments
                 let filtered_emails: Vec<EmailMessage> = emails.into_iter()
                     .filter(|email| email.get_image_attachments().is_empty())
@@ -695,7 +729,7 @@ impl Backend for GmailBackend {
     fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
         match cmd {
             Command::SyncFromCloud => Some(true),
-            Command::ViewMailbox { count: _ } => Some(false),
+            Command::ViewMailbox { count: _, label: _ } => Some(false),
             Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
             // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for gmail backend
             Command::ListLabels => Some(true),
