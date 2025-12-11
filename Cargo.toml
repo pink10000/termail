@@ -30,6 +30,10 @@ maildir = "0.6.4"
 mailparse = "0.14"
 image = "0.25.9"
 ratatui-image = { version = "8.0.2", features = ["crossterm", "tokio"] }
+dirs = "5.0"
+tracing = "0.1.43"
+tracing-subscriber = "0.3.22"
+tracing-appender = "0.2.4"
 
 [profile.dev.package.wasmtime]
 opt-level = 3
