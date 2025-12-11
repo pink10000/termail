@@ -1,6 +1,6 @@
 use google_gmail1::api::Message;
 use crate::error::Error;
-use crate::core::email::{EmailMessage, EmailSender, MimeType};
+use crate::core::email::{EmailMessage, EmailSender, MimeType, EmailAttachment};
 use maildir::Maildir;
 use std::path::Path;
 use std::collections::HashMap;
@@ -162,10 +162,11 @@ impl MaildirManager {
         }
     }
 
-    /// parse an RFC822 email format into an EmailMessage struct using mailparse crate
-    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {
-        
-        // use mailparse to parse the email
+    /// Parses an RFC822 email format into termail's EmailMessage struct using the `mailparse` crate.
+    /// # Arguments
+    /// * `raw_content` - The raw content of the email in RFC822 format.
+    /// * `maildir_id` - The ID of the email in the maildir.
+    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {        
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e)))?;
 
@@ -174,53 +175,86 @@ impl MaildirManager {
         // fine rn since we are not doing any actions from the TUI that we want to sync up
 
         // extract headers using mailparse (automatically decodes MIME encoded-words)
-        if let Some(subject) = parsed.headers.get_first_value("Subject") {
-            email.subject = subject;
-        }
+        email.subject = parsed.headers.get_first_value("Subject").unwrap_or_default();
+        email.from = EmailSender::from(parsed.headers.get_first_value("From").unwrap_or_default());
+        email.to = parsed.headers.get_first_value("To").unwrap_or_default();
+        email.date = parsed.headers.get_first_value("Date").unwrap_or_default();
 
-        if let Some(from) = parsed.headers.get_first_value("From") {
-            email.from = EmailSender::from(from);
-        }
+        // self.print_email_mime_tree(&raw_content);
 
-        if let Some(to) = parsed.headers.get_first_value("To") {
-            email.to = to;
-        }
-
-        if let Some(date) = parsed.headers.get_first_value("Date") {
-            email.date = date;
-        }
-
-        // extract body and mime type from parts
-        let (body, mime_type) = if !parsed.subparts.is_empty() {
-            let mut body = String::new();
-            let mut mime_type = Default::default();
-            
-            for part in &parsed.subparts {
-                if let Ok(text) = part.get_body()
-                {
-                    body.push_str(&text);
-                }
-
-                if let Some(part_mime) = &part.headers.get_first_header("Content-Type") {
-                    let part_mime = part_mime.get_value().to_lowercase();
-                    if part_mime.contains("html") {
-                        mime_type = MimeType::TextHtml;
-                    }
-                }
-            }
-            
-            (body, mime_type)
-        } else {
-            // fallback
-            let body = parsed.get_body()
-                .unwrap_or_else(|_| String::new());
-            (body, MimeType::TextPlain)
-        };
+        let (body, attachments) = Self::walk_mime_parts(&parsed)?;
 
         email.body = body;
-        email.mime_type = mime_type;
+        email.email_attachments = attachments;
 
         Ok(email)
+    }
+
+    /// Recursively walks MIME parts to extract text content and attachments
+    fn walk_mime_parts(part: &ParsedMail) -> Result<(String, Vec<EmailAttachment>), Error> {
+        let mimetype = &part.ctype.mimetype;
+        let mut full_text = String::new();
+        let mut full_attachments = Vec::new();
+        
+        let is_attachment = part.headers
+            .get_first_value("Content-Disposition")
+            .map(|disp| disp.to_lowercase().starts_with("attachment"))
+            .unwrap_or(false);
+        
+        // Get filename from either Content-Type name parameter or Content-Disposition
+        let filename = part.ctype.params.get("name")
+            .cloned()
+            .or_else(|| Self::get_filename_from_disposition_static(part));
+        
+        let is_image = mimetype.starts_with("image/");
+        
+        // If it has a filename, is marked as attachment, OR is an image, treat it as an attachment
+        if filename.is_some() || is_attachment || is_image {
+            // Generate a default filename if none exists
+            let name = filename.unwrap_or_else(|| {
+                if is_image {
+                    let extension = mimetype.strip_prefix("image/").unwrap_or("img");
+                    format!("image.{}", extension)
+                } else {
+                    "attachment".to_string()
+                }
+            });
+            
+            // Get raw binary data for attachments
+            if let Ok(data) = part.get_body_raw() {
+                full_attachments.push(EmailAttachment {
+                    filename: name,
+                    content_type: mimetype.clone(),
+                    data,
+                    mime_type: MimeType::AttachmentPNG,
+                });
+            }
+        } else if mimetype.starts_with("multipart/") {
+            for subpart in &part.subparts {
+                let (subpart_text, subpart_attachments) = Self::walk_mime_parts(subpart)?;
+                full_text.push_str(&subpart_text);
+                full_attachments.extend(subpart_attachments);
+            }
+        } else if mimetype == "text/plain" {
+            // Extract plain text body
+            if let Ok(text) = part.get_body() {
+                full_text.push_str(&text);
+            }
+        } else if mimetype == "text/html" {
+            // Extract HTML body
+            if let Ok(html) = part.get_body() {
+                full_text.push_str(&html);
+            }
+        }
+        // Other MIME types (like application/*, etc.) without filenames are ignored
+        Ok((full_text, full_attachments))
+    }
+
+    /// Static helper to check Content-Disposition for filenames (used in walk_mime_parts)
+    fn get_filename_from_disposition_static(mail: &ParsedMail) -> Option<String> {
+        let disposition = mail.get_headers().get_first_value("Content-Disposition")?;
+        let parsed_disp = parse_content_disposition(&disposition);
+        parsed_disp.params.get("filename").cloned()
     }
 
     // list all emails from maildir (both new and cur directories)
@@ -271,8 +305,9 @@ impl MaildirManager {
             }
         }
 
-        // sort by filename (which contains timestamp) - oldest first (reverse order)
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        // sort by filename (which contains timestamp) - newest first (ascending order)
+        // TODO: make a flag to sort by oldest first (descending order)
+        entries.sort_by(|a, b| b.0.cmp(&a.0));
 
         // take only the requested count
         for (maildir_id, path) in entries.into_iter().take(count) {
@@ -289,5 +324,45 @@ impl MaildirManager {
 
         Ok(emails)
     }
-    
+
+    fn _print_email_mime_tree(&self, raw_content: &[u8]) {
+        let parsed = parse_mail(raw_content)
+            .map_err(|e| Error::Other(format!("Failed to parse email: {}", e))).unwrap();
+
+        fn print_tree(mail: &ParsedMail, depth: usize) {
+            let indent = "    ".repeat(depth);
+            
+            // Extract the MIME type (e.g., "text/plain", "multipart/mixed")
+            let mime_type = &mail.ctype.mimetype;
+            
+            // Check if it is an attachment by looking for filename params
+            let filename: Option<String> = mail.ctype.params.get("name").cloned()
+                .or_else(|| MaildirManager::get_filename_from_disposition_static(mail));
+        
+            match filename {
+                Some(name) => println!("{}|-- [Attachment] {} ({})", indent, name, mime_type),
+                None => println!("{}|-- [Part] {}", indent, mime_type),
+            }
+        
+            // Recurse into subparts (Context Frames)
+            for subpart in &mail.subparts {
+                print_tree(subpart, depth + 1);
+            }
+        }
+
+        println!("--------------------------------");
+        println!("Subject: {}", parsed.headers.get_first_value("Subject").unwrap_or_default());
+        println!("From: {}", parsed.headers.get_first_value("From").unwrap_or_default());
+        if let Some(to) = parsed.headers.get_first_value("To") {
+            let to_emails_len = to.split(",").count();
+            if to_emails_len >= 3 {
+                println!("To: {} total emails (>= 3 detected)", to_emails_len);
+            } else {
+                println!("To: {}", to);
+            }
+        }
+        println!("Date: {}", parsed.headers.get_first_value("Date").unwrap_or_default());
+        print_tree(&parsed, 0);
+        println!("--------------------------------\n");
+    }
 }

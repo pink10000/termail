@@ -134,6 +134,7 @@ impl GmailBackend {
                         date: get_header("Date"),
                         body,
                         mime_type,
+                        email_attachments: Vec::new(),
                     });
                 }
                 Err(e) => eprintln!("Failed to fetch message: {}", e),
@@ -290,10 +291,13 @@ impl GmailBackend {
                 // update sync state by removing message_id from map
                 sync_state.message_id_to_maildir_id.remove(message_id);
             } else if action == "move_to_new" {
+                // TODO: fix this syncing issue where the image doesn't get pulled from cloud
                 // get maildir id from map
-                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
-                // move message to new in maildir
-                self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                if let Some(maildir_id) = sync_state.message_id_to_maildir_id.get(message_id) {
+                    self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                } else {
+                    eprintln!("Message id not found in sync state: {}", message_id);
+                }
             } else if action == "move_to_cur" {
                 // get maildir id from map
                 let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
@@ -324,7 +328,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("SPAM")
+                .add_label_ids("INBOX")
                 .max_results(500);
             
             // add page token if it exists
@@ -470,7 +474,7 @@ impl GmailBackend {
             let mut request = self.hub.as_ref().unwrap()
                 .users()
                 .messages_list("me")
-                .add_label_ids("SPAM")
+                .add_label_ids("INBOX")
                 .max_results(500);
             
             // add page token if it exists
@@ -672,11 +676,14 @@ impl Backend for GmailBackend {
             Command::SyncFromCloud => {
                 
                 let last_sync_id = self.maildir_manager.get_last_sync_id();
+                println!("Last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 && !self.maildir_manager.has_synced_emails()? {
+                    println!("Last sync id is 0 and no emails have been synced yet, doing full sync");
                     self.full_sync().await?;
-                    
+                    println!("Full sync completed");
                 } else {
+                    println!("Incrementing sync from last sync id: {:?}", last_sync_id);
                     self.incremental_sync(last_sync_id).await?;                    
                 }
 
@@ -684,15 +691,32 @@ impl Backend for GmailBackend {
             },
             Command::ViewMailbox { count } => {
                 let emails = self.view_mailbox(count).await.unwrap();
-                if emails.is_empty() {
+                // filter emails to the ones that only have image attachments
+                let filtered_emails: Vec<EmailMessage> = emails.into_iter()
+                    .filter(|email| email.get_image_attachments().is_empty())
+                    .collect();
+                if filtered_emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {
-                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
+                    Ok(CommandResult::Email(filtered_emails.into_iter().next().unwrap()))
                 } else {
-                    Ok(CommandResult::Emails(emails))
+                    Ok(CommandResult::Emails(filtered_emails))
                 }
             },
             Command::Null => Ok(CommandResult::Empty)
+        }
+    }
+
+    /// Defines which commands require authentication to the Gmail service.
+    fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
+        match cmd {
+            Command::SyncFromCloud => Some(true),
+            Command::ViewMailbox { count: _ } => Some(false),
+            Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
+            // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for gmail backend
+            Command::ListLabels => Some(true),
+            Command::Null => Some(false),
+            _ => None
         }
     }
 }

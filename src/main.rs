@@ -131,7 +131,28 @@ async fn run_cli(
         }
     }
 
-    let backend = create_authenticated_backend(&config).await;
+    // Some commands do not require authentication. In particular, we might just want to read
+    // from Maildir directly, so we can create a backend that does not require authentication
+    // and only do the authentication if we need to. 
+    // 
+    // The commands that require authentication should be defined by the particular backennd 
+    // implementations. 
+    let mut backend = config.get_backend();
+    match backend.requires_authentication(&command) {
+        Some(true) => {
+            backend.authenticate().await.unwrap_or_else(|e| {
+                eprintln!("Authentication failed: {}", e);
+                std::process::exit(1);
+            });
+        },
+        Some(false) => {}
+        None => {
+            println!("Command undefined for authentication.");
+            println!("Executing command without authentication.");
+        }
+    }
+    
+    println!("Backend Created: {}", config.termail.default_backend);
     match backend.do_command(command, Some(plugin_manager)).await {
         Ok(result) => {
             println!("RESULT:\n{}", result);
