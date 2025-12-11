@@ -30,7 +30,7 @@ impl GreenmailBackend {
         
         let maildir = Maildir::from(config.maildir_path.clone());
         maildir.create_dirs().unwrap_or_else(|e| {
-            eprintln!("Failed to create maildir directories: {}", e);
+            tracing::error!("Failed to create maildir directories: {}", e);
             std::process::exit(1);
         });
         
@@ -42,7 +42,7 @@ impl GreenmailBackend {
             editor,
             maildir: Maildir::from(config.maildir_path.clone()),
             maildir_manager: MaildirManager::new(config.maildir_path.clone()).unwrap_or_else(|e| {
-                eprintln!("Failed to create maildir manager: {}", e);
+                tracing::error!("Failed to create maildir manager: {}", e);
                 std::process::exit(1);
             }),
         }
@@ -72,10 +72,10 @@ impl GreenmailBackend {
         
         // Check if mailbox has any messages
         let num_messages = mailbox.exists;
-        println!("Mailbox has {} messages", num_messages);
+        tracing::info!("Mailbox has {} messages", num_messages);
         
         if num_messages == 0 {
-            println!("No messages in INBOX to sync");
+            tracing::info!("No messages in INBOX to sync");
             imap_session.logout()?;
             return Ok(0);
         }
@@ -91,7 +91,7 @@ impl GreenmailBackend {
                         let raw_content = message.body().unwrap_or(&[]);
                         
                         if raw_content.is_empty() {
-                            println!("Warning: Message {} has empty body, skipping", msg_num);
+                            tracing::error!("Warning: Message {} has empty body, skipping", msg_num);
                             continue;
                         }
                         
@@ -99,7 +99,7 @@ impl GreenmailBackend {
                         let flags = message.flags();
                         let is_unread = !flags.iter().any(|f| matches!(f, imap::types::Flag::Seen));
                         
-                        println!("Message {} - Unread: {}, Size: {} bytes", msg_num, is_unread, raw_content.len());
+                        tracing::info!("Message {} - Unread: {}, Size: {} bytes", msg_num, is_unread, raw_content.len());
                         
                         // Store in maildir (using raw RFC822 bytes)
                         if is_unread {
@@ -111,11 +111,11 @@ impl GreenmailBackend {
                         }
                         
                         synced_count += 1;
-                        println!("Synced message {}/{}", synced_count, num_messages);
+                        tracing::info!("Synced message {}/{}", synced_count, num_messages);
                     }
                 }
                 Err(e) => {
-                    println!("Warning: Failed to fetch message {}: {}", msg_num, e);
+                    tracing::error!("Warning: Failed to fetch message {}: {}", msg_num, e);
                     continue;
                 }
             }
@@ -181,11 +181,11 @@ impl GreenmailBackend {
     }
 
     fn list_labels(&self) -> Result<Vec<Label>, Error> {
-        eprintln!("unimplemented!");
+        tracing::error!("unimplemented!");
         return Err(Error::Unimplemented {
             backend: "greenmail".to_string(),
-            feature: "list_labels".to_string(),
-        });
+                feature: "list_labels".to_string(),
+            });
     }  
 
     /// Greenmail (or the library?) parses emails in a weird way. This method provides a layer to our
@@ -248,7 +248,7 @@ impl GreenmailBackend {
         // Run the editor and check if it was successful
         let status = command.status()?;
         if !status.success() {
-            eprintln!("Editor failed with status: {:?}", status);
+            tracing::error!("Editor failed with status: {:?}", status);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Editor failed",
@@ -296,11 +296,11 @@ impl GreenmailBackend {
         // Send the email
         match mailer.send(&email) {
             Ok(_) => {
-                println!("Email sent successfully.");
+                tracing::info!("Email sent successfully.");
                 Ok(CommandResult::Empty)
             },
             Err(e) => {
-                eprintln!("Failed to send email: {}", e);
+                tracing::error!("Failed to send email: {}", e);
                 Err(Error::Connection(e.to_string()))
             },
         }
@@ -349,18 +349,18 @@ impl Backend for GreenmailBackend {
                 self.send_email(&draft)
             }
             Command::SyncFromCloud => {
-                println!("Syncing from Greenmail IMAP server...");
-                
+                tracing::info!("Syncing from Greenmail IMAP server...");
+
                 let synced_count = self.sync_from_imap()?;
-                println!("Synced {} messages from Greenmail", synced_count);
+                tracing::info!("Synced {} messages from Greenmail", synced_count);
 
                 Ok(CommandResult::Empty)
             }
             Command::ViewMailbox { count } => {
-                println!("Viewing mailbox, count: {}", count);
-                
+                tracing::info!("Viewing mailbox, count: {}", count);
+
                 let emails = self.view_mailbox(count)?;
-                
+
                 if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {

@@ -28,7 +28,7 @@ impl Editor {
         // Run the editor and check if it was successful
         let status = command.status()?;
         if !status.success() {
-            eprintln!("Editor failed with status: {:?}", status);
+            tracing::error!("Editor failed with status: {:?}", status);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Editor failed",

@@ -29,7 +29,7 @@ impl GmailBackend {
             filter_labels: config.filter_labels.clone(),
             editor,
             maildir_manager: MaildirManager::new(config.maildir_path.clone()).unwrap_or_else(|e| {
-                eprintln!("Failed to create maildir manager: {}", e);
+                tracing::error!("Failed to create maildir manager: {}", e);
                 std::process::exit(1);
             }),
         }
@@ -137,7 +137,7 @@ impl GmailBackend {
                         email_attachments: Vec::new(),
                     });
                 }
-                Err(e) => eprintln!("Failed to fetch message: {}", e),
+                Err(e) => tracing::error!("Failed to fetch message: {}", e),
             }
         }
         Ok(emails)
@@ -296,7 +296,7 @@ impl GmailBackend {
                 if let Some(maildir_id) = sync_state.message_id_to_maildir_id.get(message_id) {
                     self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
                 } else {
-                    eprintln!("Message id not found in sync state: {}", message_id);
+                    tracing::error!("Message id not found in sync state: {}", message_id);
                 }
             } else if action == "move_to_cur" {
                 // get maildir id from map
@@ -676,14 +676,14 @@ impl Backend for GmailBackend {
             Command::SyncFromCloud => {
                 
                 let last_sync_id = self.maildir_manager.get_last_sync_id();
-                println!("Last sync id: {:?}", last_sync_id);
+                tracing::info!("Last sync id: {:?}", last_sync_id);
 
                 if last_sync_id == 0 && !self.maildir_manager.has_synced_emails()? {
-                    println!("Last sync id is 0 and no emails have been synced yet, doing full sync");
+                    tracing::info!("Last sync id is 0 and no emails have been synced yet, doing full sync");
                     self.full_sync().await?;
-                    println!("Full sync completed");
+                    tracing::info!("Full sync completed");
                 } else {
-                    println!("Incrementing sync from last sync id: {:?}", last_sync_id);
+                    tracing::info!("Incrementing sync from last sync id: {:?}", last_sync_id);
                     self.incremental_sync(last_sync_id).await?;                    
                 }
 
