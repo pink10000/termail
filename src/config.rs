@@ -137,6 +137,10 @@ impl Config {
         if let Some(backend) = args.backend {
             self.termail.default_backend = backend;
         }
+        // If --log-dir was specified, override config
+        if let Some(log_dir) = &args.log_dir {
+            self.termail.log_file = Some(log_dir.to_string());
+        }
         self
     }
 

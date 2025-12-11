@@ -7,6 +7,7 @@ pub mod ui;
 pub mod plugins;
 pub mod maildir;
 pub mod core;
+pub mod logger;
 use plugins::plugins::PluginManager;
 use clap::{Parser, ArgAction};
 use backends::{BackendType, Backend};
@@ -45,6 +46,10 @@ pub struct Args {
     /// Config file location
     #[arg(long, value_parser = clap::value_parser!(PathBuf))]
     config_file: Option<PathBuf>,
+
+    /// Log file directory
+    #[arg(long, value_parser = clap::value_parser!(PathBuf))]
+    log_dir: Option<String>,
 }
 
 #[tokio::main]
