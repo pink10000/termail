@@ -5,11 +5,13 @@ use crate::auth::Credentials;
 use crate::config::BackendConfig;
 use crate::cli::command::{Command, CommandResult};
 use crate::core::{email::{EmailMessage, EmailSender}, label::Label};
+use crate::maildir::MaildirManager;
 use async_trait::async_trait;
 use lettre::{Transport, Message, SmtpTransport};
 use tempfile::NamedTempFile;
 use std::io::Write;
 use crate::plugins::plugins::PluginManager;
+use maildir::Maildir;
 
 pub struct GreenmailBackend {
     host: String,
@@ -17,6 +19,8 @@ pub struct GreenmailBackend {
     _ssl: bool, // TODO: remove this once we have a proper SSL implementation
     credentials: Credentials,
     editor: String,
+    maildir_manager: MaildirManager,
+    maildir: Maildir,
 }
 
 impl GreenmailBackend {
@@ -24,17 +28,104 @@ impl GreenmailBackend {
         let credentials = config.auth_credentials.clone()
             .expect("Greenmail backend requires credentials in configuration");
         
+        let maildir = Maildir::from(config.maildir_path.clone());
+        maildir.create_dirs().unwrap_or_else(|e| {
+            eprintln!("Failed to create maildir directories: {}", e);
+            std::process::exit(1);
+        });
+        
         Self {
             host: config.host.clone(),
             port: config.port,
             _ssl: config.ssl,
             credentials,
             editor,
+            maildir: Maildir::from(config.maildir_path.clone()),
+            maildir_manager: MaildirManager::new(config.maildir_path.clone()).unwrap_or_else(|e| {
+                eprintln!("Failed to create maildir manager: {}", e);
+                std::process::exit(1);
+            }),
         }
     }
 }
 
 impl GreenmailBackend {
+    /// Syncs emails from IMAP server to local maildir
+    /// Returns the number of messages synced
+    fn sync_from_imap(&self) -> Result<usize, Error> {
+        let domain = self.host.as_str();
+        
+        // Connect with TLS (accepting self-signed certs for local testing)
+        let tls = native_tls::TlsConnector::builder()
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true)
+            .build()
+            .unwrap();
+    
+        let client = imap::connect((domain, self.port), domain, &tls).unwrap();
+    
+        let mut imap_session = client
+            .login(&self.credentials.username, &self.credentials.password)
+            .map_err(|e| e.0)?;
+    
+        let mailbox = imap_session.select("INBOX")?;
+        
+        // Check if mailbox has any messages
+        let num_messages = mailbox.exists;
+        println!("Mailbox has {} messages", num_messages);
+        
+        if num_messages == 0 {
+            println!("No messages in INBOX to sync");
+            imap_session.logout()?;
+            return Ok(0);
+        }
+        
+        // Fetch all messages one by one to avoid issues
+        let mut synced_count = 0;
+        for msg_num in 1..=num_messages {
+            // Try fetching with BODY[] and FLAGS separately
+            match imap_session.fetch(msg_num.to_string(), "(BODY[] FLAGS)") {
+                Ok(messages) => {
+                    for message in messages.iter() {
+                        // Get raw RFC822 content using body()
+                        let raw_content = message.body().unwrap_or(&[]);
+                        
+                        if raw_content.is_empty() {
+                            println!("Warning: Message {} has empty body, skipping", msg_num);
+                            continue;
+                        }
+                        
+                        // Check if message is unread (doesn't have \Seen flag)
+                        let flags = message.flags();
+                        let is_unread = !flags.iter().any(|f| matches!(f, imap::types::Flag::Seen));
+                        
+                        println!("Message {} - Unread: {}, Size: {} bytes", msg_num, is_unread, raw_content.len());
+                        
+                        // Store in maildir (using raw RFC822 bytes)
+                        if is_unread {
+                            self.maildir.store_new(raw_content)
+                                .map_err(|e| Error::Other(format!("Failed to store message in new: {}", e)))?;
+                        } else {
+                            self.maildir.store_cur_with_flags(raw_content, "")
+                                .map_err(|e| Error::Other(format!("Failed to store message in cur: {}", e)))?;
+                        }
+                        
+                        synced_count += 1;
+                        println!("Synced message {}/{}", synced_count, num_messages);
+                    }
+                }
+                Err(e) => {
+                    println!("Warning: Failed to fetch message {}: {}", msg_num, e);
+                    continue;
+                }
+            }
+        }
+    
+        imap_session.logout()?;
+    
+        Ok(synced_count)
+    }
+
     fn fetch_inbox_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
         let domain = self.host.as_str();
         
@@ -75,6 +166,17 @@ impl GreenmailBackend {
         // be nice to the server and log out
         imap_session.logout()?;
     
+        Ok(emails)
+    }
+
+    /// Views emails from the local maildir
+    fn view_mailbox(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
+        let emails = self.maildir_manager.list_emails(count)?;
+        
+        if emails.is_empty() {
+            return Ok(Vec::new());
+        }
+        
         Ok(emails)
     }
 
@@ -247,18 +349,40 @@ impl Backend for GreenmailBackend {
                 self.send_email(&draft)
             }
             Command::SyncFromCloud => {
-
-                println!("sync from lcoud called");
+                println!("Syncing from Greenmail IMAP server...");
+                
+                let synced_count = self.sync_from_imap()?;
+                println!("Synced {} messages from Greenmail", synced_count);
 
                 Ok(CommandResult::Empty)
             }
             Command::ViewMailbox { count } => {
-
-                println!("view mailbox called, count: {:?}", count);
-
-                Ok(CommandResult::Empty)
+                println!("Viewing mailbox, count: {}", count);
+                
+                let emails = self.view_mailbox(count)?;
+                
+                if emails.is_empty() {
+                    Ok(CommandResult::Empty)
+                } else if count == 1 {
+                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
+                } else {
+                    Ok(CommandResult::Emails(emails))
+                }
             }
             Command::Null => Ok(CommandResult::Empty)
+        }
+    }
+
+    /// Defines which commands require authentication to the Greenmail service.
+    fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
+        match cmd {
+            Command::SyncFromCloud => Some(true),
+            Command::ViewMailbox { count: _ } => Some(false),
+            Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
+            // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for greenmail backend
+            Command::ListLabels => Some(false),
+            Command::Null => Some(false),
+            _ => None
         }
     }
 }

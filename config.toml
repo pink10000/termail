@@ -3,7 +3,7 @@
 cli = false
 default_backend = "greenmail"
 email_fetch_count = 20
-editor = "vim"   # "vim" or "code" for VSCode
+editor = ""   # "vim" or "code" for VSCode
 plugins = [] # plugins are not case-sensitive
 
 [backends.greenmail]
