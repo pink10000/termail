@@ -28,6 +28,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 cap-std = "3.4.5"
 maildir = "0.6.4"
 mailparse = "0.14"
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [profile.dev.package.wasmtime]
 opt-level = 3

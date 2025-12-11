@@ -2,24 +2,17 @@ use google_gmail1::api::Message;
 use crate::error::Error;
 use crate::core::email::{EmailMessage, EmailSender, MimeType};
 use maildir::Maildir;
-use std::path::Path;
-use std::collections::HashMap;
-use serde::Serialize;
-use serde::Deserialize;
-use std::path::PathBuf;
 use mailparse::*;
+use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SyncState {
-    pub last_sync_id: u64,
-    pub sync_state_path: PathBuf,
-    pub message_id_to_maildir_id: HashMap<String, String>,
-}
 
 pub struct MaildirManager {
     maildir: Maildir,
-    sync_state: SyncState,
+    db_path: PathBuf,
+    connection: Mutex<Connection>,
 }
 
 impl MaildirManager {
@@ -32,67 +25,185 @@ impl MaildirManager {
         maildir.create_dirs()
             .map_err(|e| Error::Other(format!("Failed to create maildir directories: {}", e)))?;
 
-        let sync_state_path = maildir.path().join("sync_state.json");
-        let sync_state = Self::initialize_sync_state(&sync_state_path)?;
+        let db_path = maildir.path().join("sync_state.db");
+        
+        let conn = Self::open_or_create_database(&db_path)?;
         
         Ok(Self { 
             maildir,
-            sync_state: sync_state,
+            db_path,
+            connection: Mutex::new(conn),
         })
     }
 
-    fn initialize_sync_state(sync_state_path: &Path) -> Result<SyncState, Error> {
-        let sync_state: SyncState;
+    fn open_or_create_database(sync_state_path: &Path) -> Result<Connection, Error> {
+        // opens or create the database file
+        let conn = Connection::open(sync_state_path)
+            .map_err(|e| Error::Other(format!("Failed to open / create sync state database: {}", e)))?;
 
-        if !sync_state_path.exists() {
-            // sync state file does not exist, create it with default values, write to file then return SyncState
-            sync_state = SyncState {
-                last_sync_id: 0,
-                sync_state_path: sync_state_path.to_path_buf(),
-                message_id_to_maildir_id: HashMap::new(),
-            };
+        Self::create_tables(&conn)?;
+        Ok(conn)
+    }
 
-            Self::save_sync_state_to_file(sync_state_path, &sync_state)?;
+    // create tables if don't exist
+    fn create_tables(conn: &Connection) -> Result<(), Error> {
+        // create sync_state table
+        // keeps track of the lasy sync id from gmail
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sync_state (
+                key TEXT PRIMARY KEY,
+                last_sync_id INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to create sync_state table: {}", e)))?;
 
+        conn.execute(
+            "INSERT OR IGNORE INTO sync_state (key, last_sync_id) VALUES ('state', 0)",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to initialize last_sync_id: {}", e)))?;
+
+        // create message_map table
+        // keeps track of the mapping between gmail_id and maildir_id
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS message_map (
+                gmail_id TEXT PRIMARY KEY,
+                maildir_id TEXT NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to create message_map table: {}", e)))?;
+
+        Ok(())
+    }
+
+
+    // read last_sync_id from the database
+    pub fn get_last_sync_id(&self) -> u64 {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)));
+        
+        if let Ok(conn) = conn {
+            conn.query_row(
+                "SELECT last_sync_id FROM sync_state WHERE key = 'state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
         } else {
-            // sync state file exists, read it, and parse it into a SyncState struct
-            sync_state = Self::load_sync_state_from_file(sync_state_path)?;
+            return 0;
+        }
+    }   
+
+    // save last_sync_id to the database
+    pub fn save_last_sync_id(&self, last_sync_id: u64) -> Result<(), Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        conn.execute(
+            "UPDATE sync_state SET last_sync_id = ?1 WHERE key = 'state'",
+            params![last_sync_id as i64],
+        )
+        .map_err(|e| Error::Other(format!("Failed to update last_sync_id: {}", e)))?;
+
+        Ok(())
+    }
+
+    // returns the filesystem path to the db
+    pub fn get_sync_state_path(&self) -> PathBuf {
+        self.db_path.clone()
+    }
+
+    // returns the number of mappings in the db
+    pub fn get_number_of_mappings(&self) -> Result<usize, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        let statement = "SELECT COUNT(*) FROM message_map";
+        let count: u32 = conn.query_row(statement, params![], |row| row.get(0))
+            .map_err(|e| Error::Other(format!("Failed to get number of mappings: {}", e)))?;
+        Ok(count as usize)
+    }
+
+    // checks if there are any mappings in the db
+    pub fn has_synced_emails(&self) -> Result<bool, Error> {
+        if self.get_number_of_mappings()? > 0 {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    // returns the maildir_id for a given gmail_id
+    pub fn get_maildir_id(&self, gmail_id: &str) -> Result<Option<String>, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        conn.query_row(
+            "SELECT maildir_id FROM message_map WHERE gmail_id = ?1",
+            params![gmail_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| Error::Other(format!("Failed to fetch maildir_id: {}", e)))
+    }
+
+    // returns all gmail_id -> maildir_id mappings from the db
+    pub fn get_all_mappings(&self) -> Result<HashMap<String, String>, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        // prepare statement
+        let mut stmt = conn.prepare("SELECT gmail_id, maildir_id FROM message_map")
+            .map_err(|e| Error::Other(format!("Failed to prepare message_map query: {}", e)))?;
+        
+        // get all rows from table
+        let rows = stmt.query_map(params![], |row| {
+            let gmail_id: String = row.get(0)?;
+            let maildir_id: String = row.get(1)?;
+            Ok((gmail_id, maildir_id))
+        })
+        .map_err(|e| Error::Other(format!("Failed to query message_map: {}", e)))?;
+
+        // iterate rows and put into hashmap
+        let mut mappings = HashMap::new();
+        for row in rows {
+            let (gmail_id, maildir_id) = row
+                .map_err(|e| Error::Other(format!("Failed to read message_map row: {}", e)))?;
+            mappings.insert(gmail_id, maildir_id);
+        }
+        Ok(mappings)
+    }
+
+
+    // remove mappings for passed gmail_ids.
+    pub fn remove_mappings(&self, gmail_ids: &[String]) -> Result<(), Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+
+        for gmail_id in gmail_ids {
+            conn.execute(
+                "DELETE FROM message_map WHERE gmail_id = ?1",
+                params![gmail_id],
+            )
+            .map_err(|e| Error::Other(format!("Failed to delete message_map row: {}", e)))?;
         }
 
-        Ok(sync_state)
+        Ok(())
     }
 
-    pub fn get_last_sync_id(&self) -> u64 {
-        self.sync_state.last_sync_id
-    }
+    // add mapping for passed gmail_id and maildir_id.
+    pub fn add_mapping(&self, gmail_id: String, maildir_id: String) -> Result<(), Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
 
-    pub fn get_sync_state_path(&self) -> PathBuf {
-        self.sync_state.sync_state_path.clone()
-    }
-
-    pub fn has_synced_emails(&self) -> Result<bool, Error> {
-        // Check if message_id_map has any entries
-        let state = MaildirManager::load_sync_state_from_file(&self.sync_state.sync_state_path)?;
-        Ok(!state.message_id_to_maildir_id.is_empty())
-    }
-
-    // load sync state from file and parse it into a SyncState struct
-    pub fn load_sync_state_from_file(sync_state_path: &Path) -> Result<SyncState, Error> {
-        let content = std::fs::read_to_string(sync_state_path).map_err(
-            |e| Error::Other(format!("Failed to read sync state file: {}", e)))?;
-        let sync_state = serde_json::from_str(&content).map_err(
-            |e| Error::Other(format!("Failed to parse sync state file: {}", e)))?;
-
-        Ok(sync_state)
-    }
-
-    // serialize SyncState struct and save it to file
-    pub fn save_sync_state_to_file(sync_state_path: &Path, sync_state: &SyncState) -> Result<(), Error> {
-        let content = serde_json::to_string_pretty(&sync_state)
-                .map_err(|e| Error::Other(format!("Failed to serialize sync state: {}", e)))?;
-        std::fs::write(sync_state_path, content)
-            .map_err(|e| Error::Other(format!("Failed to write sync state to file: {}", e)))?;
-
+        conn.execute(
+            "INSERT OR REPLACE INTO message_map (gmail_id, maildir_id) VALUES (?1, ?2)",
+            params![gmail_id, maildir_id],
+        )
+        .map_err(|e| Error::Other(format!("Failed to add message_map row: {}", e)))?;
+        
         Ok(())
     }
 

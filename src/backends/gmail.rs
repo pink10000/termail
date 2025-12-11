@@ -194,14 +194,13 @@ impl GmailBackend {
     }
 
     async fn incremental_sync(&self, last_sync_id: u64) -> Result<(), Error> {
-
+        // println!("Starting incremental sync");
         let result = self.hub.as_ref().unwrap()
             .users()
             .history_list("me")
             .start_history_id(last_sync_id)
             .doit()
             .await;
-
 
         if let Err(e) = result {
             if e.to_string().contains("404") {
@@ -213,9 +212,6 @@ impl GmailBackend {
         }
 
         let curr_history_id = result.as_ref().unwrap().1.history_id.unwrap();
-
-        let sync_state_path = self.maildir_manager.get_sync_state_path();
-        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
 
         // iterate thru all the history records starting at last_sync_id
         // make sure to go to all pages
@@ -280,41 +276,47 @@ impl GmailBackend {
         
         }
 
+        let mapping = self.maildir_manager.get_all_mappings()?;
+
         // do the right thing based on the action
         for (message_id, action) in message_id_to_action.iter() {
-            if action == "delete" {
-                // get maildir id from map
-                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
-                // delete message from maildir using maildir_id
-                self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
-                // update sync state by removing message_id from map
-                sync_state.message_id_to_maildir_id.remove(message_id);
-            } else if action == "move_to_new" {
-                // get maildir id from map
-                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
-                // move message to new in maildir
-                self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
-            } else if action == "move_to_cur" {
-                // get maildir id from map
-                let maildir_id = sync_state.message_id_to_maildir_id.get(message_id).unwrap();
-                // move message to cur in maildir
-                let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
-                // update sync state by removing message_id from map and adding new maildir_id
-                sync_state.message_id_to_maildir_id.remove(message_id);
-                sync_state.message_id_to_maildir_id.insert(message_id.clone(), new_maildir_id);
+            // get maildir id from map
+            
+            let maildir_id = mapping.get(message_id).unwrap();
+            
+            match action.as_str() {
+                "delete" => {
+                    // delete message from maildir using maildir_id
+                    self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
+                    // remove mapping from db
+                    self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
+                }
+                "move_to_new" => {
+                    // move message to new in maildir
+                    self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
+                }
+                "move_to_cur" => {
+                    // move message to cur in maildir
+                    let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
+                    // need to update mapping in db since maildir changes id since we are doing a manual move
+                    self.maildir_manager.remove_mappings(&[message_id.clone()]).unwrap();
+                    self.maildir_manager.add_mapping(message_id.clone(), new_maildir_id).unwrap();
+                }
+                _ => {
+                    return Err(Error::Other(format!("Invalid action: {}", action)));
+                }
             }
         }
             
         // update last sync id
-        sync_state.last_sync_id = curr_history_id;
-        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
+        self.maildir_manager.save_last_sync_id(curr_history_id)?;
 
 
         Ok(())
     }
 
     async fn smart_sync(&self) -> Result<(), Error> {
-
+        // println!("Starting smart sync");
         // Get all current gmail message ids
         let mut all_gmail_ids: HashSet<String> = HashSet::new();
         let mut page_token: Option<String> = None;
@@ -353,9 +355,8 @@ impl GmailBackend {
             }
         }
         // Get all current maildir message ids
-        let sync_state_path = self.maildir_manager.get_sync_state_path();
-        let sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
-        let local_ids: HashSet<String> = sync_state.message_id_to_maildir_id.keys().cloned().collect();
+        let mapping = self.maildir_manager.get_all_mappings()?;
+        let local_ids: HashSet<String> = mapping.keys().cloned().collect();
     
         // Find differences
         let to_add_ids = &all_gmail_ids - &local_ids;
@@ -367,8 +368,6 @@ impl GmailBackend {
         // println!("to_update_ids size: {:?}", to_update_ids.len());
 
         // Downlaod new messages
-        let mut sync_updates_to_add: Vec<(String, String)> = Vec::new();
-
         for id in to_add_ids {
             let message_response = self.hub.as_ref().unwrap()
                 .users()
@@ -388,32 +387,27 @@ impl GmailBackend {
                         } else {
                             maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
                         } 
-                    
-                    // Add to sync updates to add
-                    sync_updates_to_add.push((id.clone(), maildir_id));
-                    
+
+                    // add mapping to db
+                    self.maildir_manager.add_mapping(id.clone(), maildir_id.clone()).unwrap();
                 }
                 Err(e) => {
                     return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
                 }
             }
         }
-        // update sync state with new messages
-        self.update_sync_state(&sync_updates_to_add).unwrap();
         
         // Take care of deleted messages
         // maildir deletes messages based on maildir_id so we need to get the maildir_id from the sync state
-        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
         for gmail_id in to_delete_ids {
-            let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
+            let maildir_id = mapping.get(&gmail_id).unwrap();
+            // delete message from maildir using maildir_id
             self.maildir_manager.delete_message(maildir_id.clone()).unwrap();
-            sync_state.message_id_to_maildir_id.remove(&gmail_id);
+            // remove mapping from db
+            self.maildir_manager.remove_mappings(&[gmail_id.clone()]).unwrap();
         }
-        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
         
         // Update existing messagse if needed
-        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
-
         for gmail_id in to_update_ids {
             // if message was updated (read or unread) then we need to update the message in the maildir
             let metadata_response = self.hub.as_ref().unwrap()
@@ -425,7 +419,7 @@ impl GmailBackend {
                 .map_err(|e| Error::Connection(format!("Failed to fetch message: {}", e)));
 
             // get maildir id form gmail id
-            let maildir_id = sync_state.message_id_to_maildir_id.get(&gmail_id).unwrap();
+            let maildir_id = mapping.get(&gmail_id).unwrap();
 
             // figure out if message is read or unread
             let is_read = !metadata_response.unwrap().1.label_ids.clone().unwrap_or_default().contains(&"UNREAD".to_string());
@@ -436,34 +430,33 @@ impl GmailBackend {
             if !is_read && maildir_directory == "cur" {
                 // if not read in cloud but read locally then move message to new in maildir
                 let new_maildir_id = self.maildir_manager.maildir_move_cur_to_new(&maildir_id).unwrap();
-                sync_state.message_id_to_maildir_id.remove(&gmail_id);
-                sync_state.message_id_to_maildir_id.insert(gmail_id.clone(), new_maildir_id);
-
+                // update mapping in db
+                self.maildir_manager.remove_mappings(&[gmail_id.clone()]).unwrap();
+                self.maildir_manager.add_mapping(gmail_id.clone(), new_maildir_id).unwrap();
             } else if is_read && maildir_directory == "new" {
                 // if read in cloud but in new then move message to cur in maildir
                 self.maildir_manager.maildir_move_new_to_cur(&maildir_id).unwrap();
             }
         }
 
-        // Update last_sync_id and sync sate
+        // Update last_sync_id 
         let profile_result = self.hub.as_ref().unwrap()
             .users()
             .get_profile("me")
             .doit()
             .await
             .map_err(|e| Error::Connection(format!("Failed to get profile: {}", e)))?;
+        
         let last_sync_id = profile_result.1.history_id.unwrap();
-        sync_state.last_sync_id = last_sync_id;
-        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
+        self.maildir_manager.save_last_sync_id(last_sync_id)?;
 
         Ok(())
     }
 
     async fn full_sync(&self) -> Result<(), Error> {
+        // println!("Starting full sync");
         // TODO: can later get progress to show easily later
         let mut page_token: Option<String> = None;
-
-        let mut updates = Vec::new();
 
         loop {
             // build request
@@ -510,9 +503,9 @@ impl GmailBackend {
                         } else {
                             maildir_id = self.maildir_manager.save_message(&message.1, "cur".to_string()).unwrap();
                         } 
-                        
-                        updates.push((message.1.id.unwrap().clone(), maildir_id));
 
+                        // add mapping to db
+                        self.maildir_manager.add_mapping(message.1.id.unwrap().clone(), maildir_id).unwrap();
                     }
                     Err(e) => {
                         return Err(Error::Connection(format!("Failed to fetch message: {}", e)));
@@ -520,8 +513,6 @@ impl GmailBackend {
                 }
 
             }
-            // update sync state
-            self.update_sync_state(&updates).unwrap();
 
             // break if no more pages
             if page_token.is_none() {
@@ -529,22 +520,16 @@ impl GmailBackend {
             }
         }
 
-        Ok(())
-    }
-
-    fn update_sync_state(&self, updates: &[(String, String)]) -> Result<(), Error> {
-
-        let sync_state_path = self.maildir_manager.get_sync_state_path();
+        // Update last_sync_id 
+        let profile_result = self.hub.as_ref().unwrap()
+            .users()
+            .get_profile("me")
+            .doit()
+            .await
+            .map_err(|e| Error::Connection(format!("Failed to get profile: {}", e)))?;
         
-        // load sync state from file
-        let mut sync_state = MaildirManager::load_sync_state_from_file(&sync_state_path)?;
-        // update sync state
-        for (message_id, maildir_id) in updates {
-            sync_state.message_id_to_maildir_id.insert(message_id.clone(), maildir_id.clone());
-        }
-
-        // save sync state to file
-        MaildirManager::save_sync_state_to_file(&sync_state_path, &sync_state)?;
+        let last_sync_id = profile_result.1.history_id.unwrap();
+        self.maildir_manager.save_last_sync_id(last_sync_id)?;
 
         Ok(())
     }
