@@ -28,8 +28,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 cap-std = "3.4.5"
 maildir = "0.6.4"
 mailparse = "0.14"
-sha2 = "0.10.9"
-zip = "6.0.0"
+gix = {version = "0.75.0", features = ["worktree-mutation", "async-network-client-async-std"] }
 
 [profile.dev.package.wasmtime]
 opt-level = 3

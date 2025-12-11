@@ -19,7 +19,7 @@ pub struct TermailConfig {
     pub email_fetch_count: usize,
     pub editor: String, 
     pub plugins: Vec<String>,
-    pub plugin_hashes: Vec<String>
+    pub plugin_dir: String
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

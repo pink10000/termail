@@ -645,12 +645,12 @@ impl Backend for GmailBackend {
                 }
 
                 // Plugin hook-point: Hook::BeforeSend
-                if let Some(plugin_manager) = plugin_manager {
+                /*if let Some(plugin_manager) = plugin_manager {
                     let updated_body = plugin_manager.dispatch(
                         Hook::BeforeSend.to_wit_event(draft.body.clone())
                     ).await?;
                     draft.body = updated_body;
-                }
+                }*/
 
                 let email = draft.to_lettre_email()?;
                 let raw_bytes = email.formatted();

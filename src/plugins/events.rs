@@ -52,41 +52,44 @@ impl Hook {
 impl event_api::Event {
     /// Create a BeforeSend event with the given content
     pub fn before_send(content: String) -> Self {
-        event_api::Event::BeforeSend ( event_api::BeforeSend { 
-            content: content 
+        event_api::Event::BeforeSend ( event_api::BeforeSend {
+            to: Some("".to_string()),
+            fr_om: Some("".to_string()),
+            content: Some(content),
+            subject: Some("".to_string()),
         })
     }
 
     /// Create an AfterSend event with the given content
     pub fn after_send(content: String) -> Self {
         event_api::Event::AfterSend(event_api::AfterSend { 
-            content: content 
+            content: Some(content) 
         })
     }
 
     /// Create a BeforeReceive event with the given content
     pub fn before_receive(content: String) -> Self {
         event_api::Event::BeforeReceive(event_api::BeforeReceive { 
-            content: content 
+            content: Some(content) 
         })
     }
 
     /// Create an AfterReceive event with the given content
     pub fn after_receive(content: String) -> Self {
         event_api::Event::AfterReceive(event_api::AfterReceive { 
-            content: content 
+            content: Some(content) 
         })
     }
 
     /// Extract the content string from any event variant
-    pub fn content(&self) -> &str {
+   /* pub fn content(&self) -> &str {
         match self {
-            event_api::Event::BeforeSend(content) => content,
-            event_api::Event::AfterSend(content) => content,
-            event_api::Event::BeforeReceive(content) => content,
-            event_api::Event::AfterReceive(content) => content,
+            event_api::Event::BeforeSend(content) => &content.content.unwrap(),
+            event_api::Event::AfterSend(content) => &content.content.unwrap(),
+            event_api::Event::BeforeReceive(content) => &content.content.unwrap(),
+            event_api::Event::AfterReceive(content) => &(&content.content).unwrap(),
         }
-    }
+    }*/
 
     /// Get the Hook variant that corresponds to this event
     pub fn hook(&self) -> Hook {

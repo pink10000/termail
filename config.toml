@@ -5,6 +5,7 @@ default_backend = "greenmail"
 email_fetch_count = 20
 editor = "vim"   # "vim" or "code" for VSCode
 plugins = [] # plugins are not case-sensitive
+plugin_dir = "plugins/"
 
 [backends.greenmail]
 auth_credentials = { username = "user1@example.com", password = "password123"}

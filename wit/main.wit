@@ -15,17 +15,17 @@ interface event-api {
 	}
 
 	record after-send {
-		content: string
+		content: option<string>
 	}
 	type after-send-response = result<string, string>;
 
 	record before-receive {
-		content: string
+		content: option<string>
 	}
 	type before-receive-response = result<string, string>;
 
 	record after-receive {
-		content: string
+		content: option<string>
 	}
 	type after-receive-response = result<string, string>;
 
