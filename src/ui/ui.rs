@@ -4,7 +4,7 @@ use ratatui::{
     style::{Color, Style, Stylize},
     widgets::{Block, BorderType, Borders, Paragraph, Widget}
 };
-use ratatui_image::StatefulImage;
+
 use crate::{
     core::email::EmailMessage,
     ui::{
@@ -151,18 +151,7 @@ impl App {
 
                 self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
 
-                // Render message text
-                frame.render_widget(messager.clone(), layouts.middle);
-
-                // Render image if available (overlaid on top of message area)
-                if let Some(async_state) = &mut self.async_state {
-                    let image_widget: StatefulImage<ratatui_image::thread::ThreadProtocol> = StatefulImage::default();
-                    frame.render_stateful_widget(
-                        image_widget,
-                        layouts.middle,
-                        async_state
-                    );
-                }
+                messager.render_with_images(layouts.middle, buf, &mut self.async_state);
             },
             ActiveViewState::ComposeView(composer) => {
                 self.render_top_bar(layouts.top_bar, buf, "Compose Email".to_string());

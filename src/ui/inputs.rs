@@ -67,7 +67,7 @@ impl App {
                 // Initialize image protocol if email has images
                 self.init_image_protocol_for_email(&selected_email);
 
-                self.state = ActiveViewState::MessageView(Messager { email: selected_email, scroll: 0, content_height });
+                self.state = ActiveViewState::MessageView(Messager::new(selected_email, content_height));
             }
             _ => {}
         }
@@ -111,7 +111,7 @@ impl App {
         Ok(())
     }
 
-    /// Handles the key events for the compose view. 
+    /// Handles the key events for the compose view.
     fn handle_compose_view(&mut self, key_event: KeyEvent) -> Result<(), Error> {
         let cvs = match &mut self.state {
             ActiveViewState::ComposeView(cvs) => cvs,
@@ -226,5 +226,5 @@ impl App {
             view_state.scroll = view_state.scroll.saturating_sub(1).clamp(0, max_scroll);
         }
         Ok(())
-    }    
+    }
 }
