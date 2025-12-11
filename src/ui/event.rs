@@ -1,5 +1,6 @@
 use futures::{FutureExt, StreamExt};
-use ratatui::crossterm::event::{Event as CrosstermEvent, EventStream};
+use crossterm::event::{Event as CrosstermEvent, EventStream};
+use ratatui_image::thread::ResizeRequest;
 use tokio::task::JoinHandle;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -10,7 +11,6 @@ use crate::error::Error;
 const TICK_FPS: f64 = 30.0;
 
 /// Terminal event.
-#[derive(Clone, Debug)]
 pub enum Event {
     /// A tick event emitted at a fixed rate.
     Tick,
@@ -20,13 +20,13 @@ pub enum Event {
     App(AppEvent),
 }
 
-#[derive(Clone, Debug)]
 pub enum AppEvent {
     EmailsFetched(Vec<EmailMessage>),
     LabelsFetched(Vec<Label>),
     SpawnEditor,
     SendEmail(EmailMessage),
     SyncFromCloud,
+    ImageResizeRequest(ResizeRequest),
     Quit,
 }
 
@@ -89,6 +89,24 @@ impl EventHandler {
         // Ignore the result as the reciever cannot be dropped while this struct still has a
         // reference to it
         let _ = self.sender.send(Event::App(app_event));
+    }
+
+    /// Creates a sender that wraps ResizeRequests as AppEvents::ImageResizeRequest
+    /// This allows ThreadProtocol to send resize requests through the main event channel
+    ///
+    /// TODO: Explore if this is the best way to handle this. I fear there may be some performance issues
+    /// with this approach.
+    pub fn create_image_resize_sender(&self) -> mpsc::UnboundedSender<ResizeRequest> {
+        let event_sender = self.sender.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(request) = rx.recv().await {
+                let _ = event_sender.send(Event::App(AppEvent::ImageResizeRequest(request)));
+            }
+        });
+
+        tx
     }
 }
 

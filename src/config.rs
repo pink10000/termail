@@ -13,12 +13,30 @@ use std::path::PathBuf;
 use std::fs;
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub enum ImageProtocol {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "kitty")]
+    Kitty,
+    #[serde(rename = "iterm2")]
+    Iterm2,
+    #[serde(rename = "sixel")]
+    Sixel
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct TermailConfig {
     pub cli: bool,
     pub default_backend: BackendType,
     pub email_fetch_count: usize,
-    pub editor: String, 
+    pub editor: String,
     pub plugins: Vec<String>,
+    /// The image protocol to use for displaying images.
+    /// If not set, the application will not render any images.
+    pub image_protocol: Option<ImageProtocol>,
+    /// Optional custom log file path (supports ~/ expansion).
+    /// If not specified, defaults to ~/.local/state/termail/termail.log
+    pub log_file: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -36,9 +54,32 @@ pub struct BackendConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {    
+pub struct Config {
     pub termail: TermailConfig,
     pub backends: HashMap<BackendType, BackendConfig>,
+}
+
+/// Expands tilde (~) in a path to the user's home directory
+fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(&path[2..]);
+        }
+    }
+    PathBuf::from(path)
+}
+
+/// Returns the default log file path following XDG Base Directory spec
+/// See: https://specifications.freedesktop.org/basedir/latest/
+fn get_default_log_path() -> PathBuf {
+    dirs::state_dir()
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join(".local/state"))
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
+        .join("termail")
+        .join("termail.log")
 }
 
 impl Config {
@@ -51,17 +92,23 @@ impl Config {
         let config_file = match config_file_path {
             Some(p) => fs::read_to_string(p)
                 .map_err(|e| Error::Config(e.to_string())),
-            None => std::fs::read_to_string("config.toml")
-                .or_else(|_| fs::read_to_string("~/.config/termail/config.toml"))
-                .or_else(|_| fs::read_to_string("/etc/termail/config.toml"))
-                .map_err(|e| Error::Other(e.to_string())),
+            None => {
+                let config_dir = dirs::config_dir()
+                    .map(|d| d.join("termail/config.toml"))
+                    .unwrap_or_else(|| PathBuf::from("~/.config/termail/config.toml"));
+
+                std::fs::read_to_string("config.toml")
+                    .or_else(|_| fs::read_to_string(config_dir))
+                    .or_else(|_| fs::read_to_string("/etc/termail/config.toml"))
+                    .map_err(|e| Error::Other(e.to_string()))
+            },
         };
 
         let config: Config = match config_file {
             Ok(c) => toml::from_str(c.as_str()).map_err(|e| Error::Config(e.to_string()))?,
             Err(e) => return Err(e),
         };
-                
+
         // Validate backend configurations
         for (be_type, be_config) in config.backends.clone().into_iter() {
             match be_type {
@@ -90,19 +137,31 @@ impl Config {
         if let Some(backend) = args.backend {
             self.termail.default_backend = backend;
         }
+        // If --log-dir was specified, override config
+        if let Some(log_dir) = &args.log_dir {
+            self.termail.log_file = Some(log_dir.to_string());
+        }
         self
     }
 
     pub fn get_backend(&self) -> Box<dyn Backend> {
         let selected_backend = self.termail.default_backend;
-        
+
         let backend_config = self.backends.get(&selected_backend)
             .expect(&format!("No configuration found for backend '{}'", selected_backend));
-        
+
         selected_backend.get_backend(backend_config, &self.termail.editor)
     }
 
     pub fn get_backend_config(&self, backend_type: &BackendType) -> Option<&BackendConfig> {
         self.backends.get(backend_type)
+    }
+
+    /// Returns the log file path from config (with tilde expansion) or the default path
+    pub fn get_log_path(&self) -> PathBuf {
+        match &self.termail.log_file {
+            Some(path) => expand_tilde(path),
+            None => get_default_log_path(),
+        }
     }
 }
