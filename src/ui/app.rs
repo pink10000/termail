@@ -17,6 +17,7 @@ use crate::backends::Backend;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::plugins::plugins::PluginManager;
+use ratatui_image::{thread::ThreadProtocol, picker::Picker};
 
 #[derive(Clone, Debug, Copy)]
 pub enum BaseViewState {
@@ -56,18 +57,20 @@ pub struct App {
     pub selected_folder: String,
     /// Plugin manager for executing plugins
     pub plugin_manager: Arc<Mutex<PluginManager>>,
+    /// Thread protocol for async image rendering (None when no image is being viewed)
+    pub async_state: Option<ThreadProtocol>,
 }
 
 impl App {
     pub fn new(
-        config: Config, 
+        config: Config,
         backend: Box<dyn Backend>,
         plugin_manager: PluginManager,
     ) -> Self {
         let backend = Arc::new(Mutex::new(backend));
         let plugin_manager = Arc::new(Mutex::new(plugin_manager));
         let events = EventHandler::new();
-        
+
         // Spawn initial label fetch
         Self::spawn_label_fetch(
             Arc::clone(&backend),
@@ -93,12 +96,13 @@ impl App {
             selected_email_index: Some(0),  // Start with first email selected
             selected_folder: "INBOX".to_string(),
             plugin_manager,
+            async_state: None,  // No image protocol until we enter message view
         }
     }
 
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<(), Error> {
         while self.running {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+            terminal.draw(|frame| self.render(frame))?;
             match self.events.next().await? {
                 Event::Tick => self.tick(),
                 Event::Crossterm(event) => match event {
@@ -167,10 +171,23 @@ impl App {
                             self.events.get_sender(),
                             self.config.termail.email_fetch_count,
                         );
+                    },
+                    AppEvent::ImageResizeRequest(request) => {
+                        // Process the resize request and update the protocol
+                        if let Some(async_state) = &mut self.async_state {
+                            match request.resize_encode() {
+                                Ok(response) => {
+                                    let _ = async_state.update_resized_protocol(response);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to resize/encode image: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }        
+        }
         Ok(())
     }
 
@@ -178,16 +195,51 @@ impl App {
         self.running = false;
     }
 
+    /// Main render function that has access to Frame for stateful widgets
+    pub fn init_image_protocol_for_email(&mut self, email: &EmailMessage) {
+        let image_attachments = email.get_image_attachments();
+        if image_attachments.is_empty() {
+            self.async_state = None;
+            return;
+        }
+        let picker = match Picker::from_query_stdio() {
+            Ok(picker) => picker,
+            Err(e) => {
+                eprintln!("Failed to initialize image picker: {}, using fallback", e);
+                Picker::from_fontsize((8, 16))
+            }
+        };
+
+        // This only decodes the first image
+        if let Some(attachment) = image_attachments.first() {
+            match image::load_from_memory(&attachment.data) {
+                Ok(dyn_img) => {
+                    // Handler for image resizing. In particular, resizing is just the process of adapting an image
+                    // to fit to the terminal area while encoding it. Stateful widgets like StatefulImage need to be
+                    // able to adapt to the terminal area dynamically.
+                    let tx = self.events.create_image_resize_sender();
+                    let protocol = picker.new_resize_protocol(dyn_img);
+                    // Store in app state
+                    self.async_state = Some(ThreadProtocol::new(tx, Some(protocol)));
+                }
+                Err(e) => {
+                    eprintln!("Failed to decode image {}: {}", attachment.filename, e);
+                    self.async_state = None;
+                }
+            }
+        }
+    }
+
     /// Handles the tick event of the terminal.
-    /// 
+    ///
     /// Anything that requires a fixed framerate will be put here.
     /// Also handles periodic email refresh (every 120 seconds).
     pub fn tick(&mut self) {
         self.tick_counter += 1;
-        
+
         // Refresh emails every 120 seconds (30 FPS * 120 seconds = 3600 ticks)
         const REFRESH_INTERVAL: u64 = 3600;
-        
+
         if self.tick_counter % REFRESH_INTERVAL == 0 {
             Self::spawn_email_fetch(
                 Arc::clone(&self.backend),
