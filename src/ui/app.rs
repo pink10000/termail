@@ -116,6 +116,10 @@ impl App {
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
                     AppEvent::EmailsFetched(emails) => self.emails = Some(emails),
+                    AppEvent::EmailLoaded(email) => {
+                        self.init_image_protocol_for_email(&email);
+                        self.state = ActiveViewState::MessageView(Messager::new(email));
+                    }
                     AppEvent::LabelsFetched(labels) => self.labels = Some(labels),
                     AppEvent::SpawnEditor => {
                         if let ActiveViewState::ComposeView(composer) = &mut self.state {
@@ -161,7 +165,6 @@ impl App {
                                 tracing::info!("Email sent successfully!");
                             },
                             _ => return Err(Error::Other("Unexpected command result from send_email".to_string())),
-                            
                         }
                     }
                     AppEvent::SyncFromCloud => {
@@ -334,6 +337,35 @@ impl App {
                 }
                 _ => {
                     tracing::error!("Unexpected command result from view_mailbox");
+                }
+            }
+        });
+    }
+
+    /// Spawns an async task to load a single email (with attachments) by id.
+    pub fn spawn_single_email_fetch(
+        backend: Arc<Mutex<Box<dyn Backend>>>,
+        sender: tokio::sync::mpsc::UnboundedSender<Event>,
+        email_id: String,
+    ) {
+        tokio::spawn(async move {
+            let result = {
+                let backend_guard = backend.lock().await;
+                backend_guard.do_command(Command::LoadEmail { email_id }, None).await
+            };
+
+            match result {
+                Ok(CommandResult::Email(email)) => {
+                    let _ = sender.send(Event::App(AppEvent::EmailLoaded(email)));
+                }
+                Ok(CommandResult::Empty) => {
+                    tracing::warn!("LoadEmail returned empty");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load email: {}", e);
+                }
+                _ => {
+                    tracing::error!("Unexpected command result from load_email");
                 }
             }
         });

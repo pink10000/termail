@@ -93,9 +93,8 @@ impl<'a> Widget for Inbox<'a> {
                     let from = fit_to_width(email.from.display_name(), from_max_width);
                     let subject = fit_to_width(&strip_emojis(&email.subject), subject_width);
                     let date = format_date(&email.date);
-
                     ListItem::new(Line::from(vec![
-                        Span::styled(from, Style::default().fg(Color::Cyan)),
+                        Span::styled(from, Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)),
                         Span::raw(" "), // space between from and subject
                         Span::styled(subject, Style::default().fg(Color::White)),
                         Span::raw(" "), // space between subject and date

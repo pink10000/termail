@@ -580,7 +580,7 @@ impl Backend for GmailBackend {
         Ok(())
     }
 
-    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {        
+    async fn do_command(&self, cmd: Command, plugin_manager: Option<&mut PluginManager>) -> Result<CommandResult, Error> {
         match cmd {
             Command::FetchInbox { count } => {
                 let emails = self.fetch_inbox_emails(count).await.unwrap();
@@ -670,17 +670,17 @@ impl Backend for GmailBackend {
             },
             Command::ViewMailbox { count } => {
                 let emails = self.view_mailbox(count).await.unwrap();
-                // filter emails to the ones that only have image attachments
-                let filtered_emails: Vec<EmailMessage> = emails.into_iter()
-                    .filter(|email| email.get_image_attachments().is_empty())
-                    .collect();
-                if filtered_emails.is_empty() {
+                if emails.is_empty() {
                     Ok(CommandResult::Empty)
                 } else if count == 1 {
-                    Ok(CommandResult::Email(filtered_emails.into_iter().next().unwrap()))
+                    Ok(CommandResult::Email(emails.into_iter().next().unwrap()))
                 } else {
-                    Ok(CommandResult::Emails(filtered_emails))
+                    Ok(CommandResult::Emails(emails))
                 }
+            },
+            Command::LoadEmail { email_id } => {
+                let email = self.maildir_manager.load_email_with_attachments(&email_id)?;
+                Ok(CommandResult::Email(email))
             },
             Command::Null => Ok(CommandResult::Empty)
         }
@@ -691,6 +691,7 @@ impl Backend for GmailBackend {
         match cmd {
             Command::SyncFromCloud => Some(true),
             Command::ViewMailbox { count: _ } => Some(false),
+            Command::LoadEmail { email_id: _ } => Some(false),
             Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
             // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for gmail backend
             Command::ListLabels => Some(true),

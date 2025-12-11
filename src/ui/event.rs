@@ -22,6 +22,10 @@ pub enum Event {
 
 pub enum AppEvent {
     EmailsFetched(Vec<EmailMessage>),
+    /// An email has been loaded and is ready to be displayed. This
+    /// exists to optimize the email attachment loadng by sending this to
+    /// a non-blocking thread.
+    EmailLoaded(EmailMessage),
     LabelsFetched(Vec<Label>),
     SpawnEditor,
     SendEmail(EmailMessage),

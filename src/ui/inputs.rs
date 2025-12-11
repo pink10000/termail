@@ -7,6 +7,7 @@ use crate::ui::{
 };
 use crate::core::email::EmailMessage;
 use crate::error::Error;
+use std::sync::Arc;
 
 /// Input handling for the App
 impl App {
@@ -45,14 +46,22 @@ impl App {
             (BaseViewState::Inbox, KeyCode::Down) => self.hover_next_email(),
             (BaseViewState::Inbox, KeyCode::Up) => self.hover_previous_email(),
             (BaseViewState::Inbox, KeyCode::Enter) => {
-                // Enter the message view with initial scroll position at the top
+                // Enter the message view: fetch full email (with attachments) by id
+                // The initial scroll position will be the top of the email body.
                 let selected_email = self.selected_email_index
                     .and_then(|index| self.emails.as_ref()?.get(index))
                     .cloned()
                     .unwrap_or_else(EmailMessage::new);
-                // Initialize image protocol if email has images
-                self.init_image_protocol_for_email(&selected_email);
 
+                // kick off async load of the full email (with attachments)
+                Self::spawn_single_email_fetch(
+                    Arc::clone(&self.backend),
+                    self.events.get_sender(),
+                    selected_email.id.clone(),
+                );
+
+                // Optimistically enter message view with current (partial) email while loading
+                self.async_state = None;
                 self.state = ActiveViewState::MessageView(Messager::new(selected_email));
             }
             _ => {}

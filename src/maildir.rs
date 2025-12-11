@@ -369,7 +369,8 @@ impl MaildirManager {
     /// # Arguments
     /// * `raw_content` - The raw content of the email in RFC822 format.
     /// * `maildir_id` - The ID of the email in the maildir.
-    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String) -> Result<EmailMessage, Error> {        
+    /// * `load_attachments` - Whether to load attachment data (set to false for list views to improve performance)
+    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String, load_attachments: bool) -> Result<EmailMessage, Error> {
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e)))?;
 
@@ -385,7 +386,7 @@ impl MaildirManager {
 
         // self.print_email_mime_tree(&raw_content);
 
-        let (body, attachments) = Self::walk_mime_parts(&parsed)?;
+        let (body, attachments) = Self::walk_mime_parts(&parsed, load_attachments)?;
 
         email.body = body;
         email.email_attachments = attachments;
@@ -394,7 +395,11 @@ impl MaildirManager {
     }
 
     /// Recursively walks MIME parts to extract text content and attachments
-    fn walk_mime_parts(part: &ParsedMail) -> Result<(String, Vec<EmailAttachment>), Error> {
+    /// 
+    /// # Arguments
+    /// * `part` - The parsed MIME part to walk
+    /// * `load_attachments` - If false, skips loading attachment data (for performance in list views)
+    fn walk_mime_parts(part: &ParsedMail, load_attachments: bool) -> Result<(String, Vec<EmailAttachment>), Error> {
         let mimetype = &part.ctype.mimetype;
         let mut full_text = String::new();
         let mut full_attachments = Vec::new();
@@ -423,18 +428,20 @@ impl MaildirManager {
                 }
             });
             
-            // Get raw binary data for attachments
-            if let Ok(data) = part.get_body_raw() {
-                full_attachments.push(EmailAttachment {
-                    filename: name,
-                    content_type: mimetype.clone(),
-                    data,
-                    mime_type: MimeType::AttachmentPNG,
-                });
+            // Only load attachment data if requested
+            if load_attachments {
+                if let Ok(data) = part.get_body_raw() {
+                    full_attachments.push(EmailAttachment {
+                        filename: name,
+                        content_type: mimetype.clone(),
+                        data,
+                        mime_type: MimeType::AttachmentPNG,
+                    });
+                }
             }
         } else if mimetype.starts_with("multipart/") {
             for subpart in &part.subparts {
-                let (subpart_text, subpart_attachments) = Self::walk_mime_parts(subpart)?;
+                let (subpart_text, subpart_attachments) = Self::walk_mime_parts(subpart, load_attachments)?;
                 full_text.push_str(&subpart_text);
                 full_attachments.extend(subpart_attachments);
             }
@@ -482,7 +489,7 @@ impl MaildirManager {
                         let raw_content = std::fs::read(path)
                             .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
 
-                        match self.parse_rfc822_email(&raw_content, maildir_id.clone()) {
+                        match self.parse_rfc822_email(&raw_content, maildir_id.clone(), true) {
                             Ok(email) => {
                                 emails.push(email);
                                 break; // Found it, move to next ID
@@ -550,7 +557,7 @@ impl MaildirManager {
             let raw_content = std::fs::read(&path)
                 .map_err(|e| Error::Other(format!("Failed to read maildir entry {}: {}", maildir_id_clone, e)))?;
 
-            match self.parse_rfc822_email(&raw_content, maildir_id.clone()) {
+            match self.parse_rfc822_email(&raw_content, maildir_id.clone(), true) {
                 Ok(email) => {
                     // Save metadata to cache for future use
                     if let Err(e) = self.save_metadata(&maildir_id, &email.date, &email.subject, &email.from.email) {
@@ -581,6 +588,27 @@ impl MaildirManager {
         // Take only the requested count
         emails.truncate(count);
         Ok(emails)
+    }
+
+    /// Load a single email by maildir_id with full attachment data
+    pub fn load_email_with_attachments(&self, maildir_id: &str) -> Result<EmailMessage, Error> {
+        let maildir_path = self.maildir.path();
+
+        let paths = [
+            maildir_path.join("new").join(maildir_id),
+            maildir_path.join("cur").join(maildir_id),
+        ];
+
+        for path in &paths {
+            if path.exists() {
+                let raw_content = std::fs::read(path)
+                    .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
+
+                return self.parse_rfc822_email(&raw_content, maildir_id.to_string(), true);
+            }
+        }
+
+        Err(Error::Other(format!("Email not found: {}", maildir_id)))
     }
 
     fn _print_email_mime_tree(&self, raw_content: &[u8]) {

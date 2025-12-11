@@ -35,6 +35,12 @@ pub enum Command {
         count: usize,
     },
 
+    /// Load a single email (with attachments) by id from the local maildir
+    LoadEmail {
+        /// Email (maildir) id to load
+        email_id: String,
+    },
+
     /// Null command (used for testing plugins))
     Null
 }
