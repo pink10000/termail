@@ -6,7 +6,6 @@ use ratatui::{
 };
 
 use crate::{
-    core::email::EmailMessage,
     ui::{
         app::{ActiveViewState, App},
         components::{folder_pane::FolderPane, inbox::Inbox}
@@ -145,15 +144,10 @@ impl App {
                 self.render_bottom_bar(layouts.bottom_bar, buf, status);
             },
             ActiveViewState::MessageView(messager) => {
-                let email = self.selected_email_index
-                    .and_then(|index| self.emails.as_ref()?.get(index))
-                    .cloned()
-                    .unwrap_or_else(EmailMessage::new);
-
-                self.render_top_bar(layouts.top_bar, buf, email.subject.clone());
+                self.render_top_bar(layouts.top_bar, buf, messager.email.subject.clone());
 
                 messager.render_with_images(layouts.middle, buf, &mut self.async_state);
-                let status = format!("{} image attachment(s) | Press ESC to quit", email.get_image_attachments().len());
+                let status = format!("{} image attachment(s) | Press ESC to quit", messager.email.get_image_attachments().len());
                 self.render_bottom_bar(layouts.bottom_bar, buf, status);
 
             },

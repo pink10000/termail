@@ -478,6 +478,15 @@ impl MaildirManager {
 
         email.body = body;
         email.email_attachments = attachments;
+        
+        // Debug: log attachment info
+        if !email.email_attachments.is_empty() {
+            tracing::info!("Parsed email {} has {} attachment(s)", email.id, email.email_attachments.len());
+            for att in &email.email_attachments {
+                tracing::info!("  - {} ({}, mime_type: {:?}, {} bytes)", 
+                    att.filename, att.content_type, att.mime_type, att.data.len());
+            }
+        }
 
         Ok(email)
     }
@@ -516,16 +525,21 @@ impl MaildirManager {
                 }
             });
             
-            // Only load attachment data if requested
-            if load_attachments {
-                if let Ok(data) = part.get_body_raw() {
-                    full_attachments.push(EmailAttachment {
-                        filename: name,
-                        content_type: mimetype.clone(),
-                        data,
-                        mime_type: MimeType::AttachmentPNG,
-                    });
-                }
+            // Get raw binary data for attachments
+            if let Ok(data) = part.get_body_raw() {
+                // Set mime_type based on whether it's actually an image
+                let mime_type = if is_image {
+                    MimeType::AttachmentPNG
+                } else {
+                    MimeType::TextPlain // Use TextPlain as default for non-image attachments
+                };
+                
+                full_attachments.push(EmailAttachment {
+                    filename: name,
+                    content_type: mimetype.clone(),
+                    data,
+                    mime_type,
+                });
             }
         } else if mimetype.starts_with("multipart/") {
             for subpart in &part.subparts {
@@ -590,8 +604,14 @@ impl MaildirManager {
                         .unwrap_or("")
                         .to_string();
                     
-                    // Extract maildir_id from filename (remove flags if present)
-                    let maildir_id = filename.split(":2,").next().unwrap_or(&filename).to_string();
+                    // Extract maildir_id from filename (remove flags and size markers)
+                    // Format can be: unique_id:2,flags,S=size or just unique_id
+                    let maildir_id = filename
+                        .split(":2,").next()  // Remove :2,flags
+                        .unwrap_or(&filename)
+                        .split(",S=").next()  // Remove ,S=size marker (GreenMail)
+                        .unwrap_or(&filename)
+                        .to_string();
                     
                     // Filter by label if specified
                     if let Some(ref filtered_ids) = filtered_maildir_ids {
@@ -620,8 +640,14 @@ impl MaildirManager {
                         .unwrap_or("")
                         .to_string();
                     
-                    // Extract maildir_id from filename (remove flags if present)
-                    let maildir_id = filename.split(":2,").next().unwrap_or(&filename).to_string();
+                    // Extract maildir_id from filename (remove flags and size markers)
+                    // Format can be: unique_id:2,flags,S=size or just unique_id
+                    let maildir_id = filename
+                        .split(":2,").next()  // Remove :2,flags
+                        .unwrap_or(&filename)
+                        .split(",S=").next()  // Remove ,S=size marker (GreenMail)
+                        .unwrap_or(&filename)
+                        .to_string();
                     
                     // Filter by label if specified
                     if let Some(ref filtered_ids) = filtered_maildir_ids {
@@ -685,20 +711,43 @@ impl MaildirManager {
     pub fn load_email_with_attachments(&self, maildir_id: &str) -> Result<EmailMessage, Error> {
         let maildir_path = self.maildir.path();
 
-        let paths = [
-            maildir_path.join("new").join(maildir_id),
-            maildir_path.join("cur").join(maildir_id),
-        ];
+        // Try both new and cur directories
+        for subdir in &["new", "cur"] {
+            let dir = maildir_path.join(subdir);
+            if !dir.exists() {
+                continue;
+            }
+            
+            // Read directory and find file matching the maildir_id
+            let entries = std::fs::read_dir(&dir)
+                .map_err(|e| Error::Other(format!("Failed to read {} directory: {}", subdir, e)))?;
+            
+            for entry in entries {
+                let entry = entry.map_err(|e| Error::Other(format!("Failed to read directory entry: {}", e)))?;
+                let path = entry.path();
+                if path.is_file() {
+                    let filename = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    
+                    // Extract the actual maildir_id from filename (strip flags and size markers)
+                    let file_maildir_id = filename
+                        .split(":2,").next()
+                        .unwrap_or(filename)
+                        .split(",S=").next()
+                        .unwrap_or(filename);
+                    
+                    // Check if this is the file we're looking for
+                    if file_maildir_id == maildir_id {
+                        let raw_content = std::fs::read(&path)
+                            .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
 
-        for path in &paths {
-            if path.exists() {
-                let raw_content = std::fs::read(path)
-                    .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
-
-                // Check database for UNREAD label
-                let is_unread = self.has_label(maildir_id, "UNREAD")
-                    .unwrap_or(false);
-                return self.parse_rfc822_email(&raw_content, maildir_id.to_string(), is_unread, true);
+                        // Check database for UNREAD label
+                        let is_unread = self.has_label(maildir_id, "UNREAD")
+                            .unwrap_or(false);
+                        return self.parse_rfc822_email(&raw_content, maildir_id.to_string(), is_unread, true);
+                    }
+                }
             }
         }
 

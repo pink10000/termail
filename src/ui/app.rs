@@ -118,6 +118,7 @@ impl App {
                     AppEvent::Quit => self.quit(),
                     AppEvent::EmailsFetched(emails) => self.emails = Some(emails),
                     AppEvent::EmailLoaded(email) => {
+                        tracing::info!("EmailLoaded event received for email: {}", email.id);
                         self.init_image_protocol_for_email(&email);
                         self.state = ActiveViewState::MessageView(Messager::new(email));
                     }
@@ -222,6 +223,8 @@ impl App {
     /// Main render function that has access to Frame for stateful widgets
     pub fn init_image_protocol_for_email(&mut self, email: &EmailMessage) {
         let image_attachments = email.get_image_attachments();
+        tracing::info!("init_image_protocol_for_email: email {} has {} total attachments, {} image attachments", 
+            email.id, email.email_attachments.len(), image_attachments.len());
         if image_attachments.is_empty() {
             self.async_state = None;
             return;
