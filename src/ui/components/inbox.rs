@@ -96,9 +96,9 @@ impl<'a> Widget for Inbox<'a> {
                     
                     // Style unread emails: white and bold, read emails: dark gray
                     let from_style = if email.is_unread {
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC)
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)
                     };
                     
                     let subject_style = if email.is_unread {
