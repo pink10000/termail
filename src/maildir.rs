@@ -42,6 +42,10 @@ impl MaildirManager {
         let conn = Connection::open(sync_state_path)
             .map_err(|e| Error::Other(format!("Failed to open / create sync state database: {}", e)))?;
 
+        // Enable foreign key constraints (required for SQLite foreign keys to work)
+        conn.execute("PRAGMA foreign_keys = ON", [])
+            .map_err(|e| Error::Other(format!("Failed to enable foreign keys: {}", e)))?;
+
         Self::create_tables(&conn)?;
         Ok(conn)
     }
@@ -70,7 +74,7 @@ impl MaildirManager {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS message_map (
                 gmail_id TEXT PRIMARY KEY,
-                maildir_id TEXT NOT NULL
+                maildir_id TEXT NOT NULL UNIQUE
             )",
             [],
         )
@@ -95,6 +99,18 @@ impl MaildirManager {
             [],
         )
         .map_err(|e| Error::Other(format!("Failed to create date index: {}", e)))?;
+
+        // create label_map table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS label_map (
+                maildir_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                PRIMARY KEY (maildir_id, label),
+                FOREIGN KEY (maildir_id) REFERENCES message_map(maildir_id)
+            )",
+            [],
+        )
+        .map_err(|e| Error::Other(format!("Failed to create label_map table: {}", e)))?;
 
         Ok(())
     }
@@ -281,6 +297,70 @@ impl MaildirManager {
         .is_ok()
     }
 
+    pub fn add_label_mappings(&self, maildir_id: &str, labels: &[String]) -> Result<(), Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        for label in labels {
+            conn.execute(
+                "INSERT OR REPLACE INTO label_map (maildir_id, label) VALUES (?1, ?2)",
+                params![maildir_id, label],
+            )
+            .map_err(|e| Error::Other(format!("Failed to add label_map row: {}", e)))?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_label_mappings(&self, maildir_ids: &[String]) -> Result<(), Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        for maildir_id in maildir_ids {
+            conn.execute(
+                "DELETE FROM label_map WHERE maildir_id = ?1",
+                params![maildir_id],
+            )
+            .map_err(|e| Error::Other(format!("Failed to remove label_map row: {}", e))).unwrap();
+        }
+        
+        Ok(())
+    }
+
+    pub fn get_maildir_ids_with_label(&self, label: &str) -> Result<Vec<String>, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        // prepare statement
+        let mut stmt = conn.prepare("SELECT maildir_id FROM label_map WHERE label = ?1")
+            .map_err(|e| Error::Other(format!("Failed to prepare label_map query: {}", e)))?;
+        
+        // get all rows from table
+        let rows = stmt.query_map(params![label], |row| row.get(0))
+            .map_err(|e| Error::Other(format!("Failed to get emails with label: {}", e)))?;
+        
+        let mut maildir_ids = Vec::new();
+        for row in rows {
+            let maildir_id: String = row.map_err(|e| Error::Other(format!("Failed to read label_map row: {}", e)))?;
+            maildir_ids.push(maildir_id);
+        }
+        Ok(maildir_ids)
+    }
+
+    /// Check if a maildir_id has a specific label in the database
+    pub fn has_label(&self, maildir_id: &str, label: &str) -> Result<bool, Error> {
+        let conn = self.connection.lock()
+            .map_err(|e| Error::Other(format!("Failed to lock sync_state connection: {}", e)))?;
+        
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM label_map WHERE maildir_id = ?1 AND label = ?2",
+            params![maildir_id, label],
+            |row| row.get(0),
+        )
+        .map_err(|e| Error::Other(format!("Failed to check label: {}", e)))?;
+        
+        Ok(count > 0)
+    }
+
     pub fn delete_message(&self, maildir_id: String) -> Result<(), Error> {
         
         // delete message from maildir
@@ -330,12 +410,12 @@ impl MaildirManager {
         }
     }
 
-    /// Save message to maildir
-    pub fn save_message(&self, message: &Message, maildir_subdir: String) -> Result<String, Error> {
-
+    // save message to maildir
+    pub fn save_message(&self, message: &Message, maildir_subdir: String, labels: &Vec<String>) -> Result<String, Error> {
+        let message_id = message.id.clone().unwrap();
         let raw_content = message.raw.clone().unwrap();
-
-        // Store message to correct maildir subdirectory
+        
+        // save message to correct maildir subdirectory
         let maildir_id = if maildir_subdir == "cur" {
             self.maildir.store_cur_with_flags(&raw_content, "")
                 .map_err(|e| Error::Other(format!("Failed to store message in cur: {}", e)))?
@@ -362,6 +442,12 @@ impl MaildirManager {
             }
         }
 
+        // add mapping to message_map table FIRST (before label_map due to foreign key constraint)
+        self.add_mapping(message_id.clone(), maildir_id.clone())?;
+
+        // save labels to label_map table (after message_map entry exists)
+        self.add_label_mappings(&maildir_id, labels)?;
+
         Ok(maildir_id)
     }
 
@@ -369,14 +455,16 @@ impl MaildirManager {
     /// # Arguments
     /// * `raw_content` - The raw content of the email in RFC822 format.
     /// * `maildir_id` - The ID of the email in the maildir.
+    /// * `is_unread` - Whether the email is unread (from database check).
     /// * `load_attachments` - Whether to load attachment data (set to false for list views to improve performance)
-    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String, load_attachments: bool) -> Result<EmailMessage, Error> {
+    pub fn parse_rfc822_email(&self, raw_content: &[u8], maildir_id: String, is_unread: bool, load_attachments: bool) -> Result<EmailMessage, Error> {
         let parsed = parse_mail(raw_content)
             .map_err(|e| Error::Other(format!("Failed to parse email: {}", e)))?;
 
         let mut email = EmailMessage::new();
         email.id = maildir_id; // TODO we want the gmail ID here not maildir id
         // fine rn since we are not doing any actions from the TUI that we want to sync up
+        email.is_unread = is_unread;
 
         // extract headers using mailparse (automatically decodes MIME encoded-words)
         email.subject = parsed.headers.get_first_value("Subject").unwrap_or_default();
@@ -469,45 +557,22 @@ impl MaildirManager {
 
     // list all emails from maildir (both new and cur directories)
     pub fn list_emails(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
+        self.list_emails_by_label(count, None)
+    }
+
+    // list emails filtered by label (if label is None, returns all emails)
+    pub fn list_emails_by_label(&self, count: usize, label: Option<&str>) -> Result<Vec<EmailMessage>, Error> {
         let maildir_path = self.maildir.path();
 
-        // Try to use database cache first for fast sorted results
-        let sorted_ids = self.get_sorted_maildir_ids(count)?;
-        if !sorted_ids.is_empty() {
-            tracing::debug!("Using cached metadata for {} emails", sorted_ids.len());
-            // Load emails using the sorted IDs from cache
-            let mut emails = Vec::new();
-            for maildir_id in sorted_ids {
-                // Try both new and cur directories
-                let paths = [
-                    maildir_path.join("new").join(&maildir_id),
-                    maildir_path.join("cur").join(&maildir_id),
-                ];
+        // If a label is specified, get the maildir IDs for that label
+        let filtered_maildir_ids: Option<std::collections::HashSet<String>> = if let Some(label_name) = label {
+            let maildir_ids = self.get_maildir_ids_with_label(label_name)?;
+            Some(maildir_ids.into_iter().collect())
+        } else {
+            None
+        };
 
-                for path in &paths {
-                    if path.exists() {
-                        let raw_content = std::fs::read(path)
-                            .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
-
-                        match self.parse_rfc822_email(&raw_content, maildir_id.clone(), true) {
-                            Ok(email) => {
-                                emails.push(email);
-                                break; // Found it, move to next ID
-                            }
-                            Err(e) => tracing::warn!("Failed to parse email {}: {}", maildir_id, e),
-                        }
-                    }
-                }
-            }
-
-            tracing::debug!("Loaded {} emails from cache", emails.len());
-            return Ok(emails);
-        }
-
-        // Fallback: No cache available, scan filesystem and rebuild cache
-        tracing::info!("No metadata cache found, scanning filesystem and building cache");
-
-        // Collect entries from both new and cur directories
+        // collect entries from both new and cur directories
         let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
 
         // Read from "new" directory (unread messages)
@@ -524,7 +589,18 @@ impl MaildirManager {
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
-                    entries.push((filename, path));
+                    
+                    // Extract maildir_id from filename (remove flags if present)
+                    let maildir_id = filename.split(":2,").next().unwrap_or(&filename).to_string();
+                    
+                    // Filter by label if specified
+                    if let Some(ref filtered_ids) = filtered_maildir_ids {
+                        if !filtered_ids.contains(&maildir_id) {
+                            continue;
+                        }
+                    }
+                    
+                    entries.push((maildir_id, path));
                 }
             }
         }
@@ -543,7 +619,18 @@ impl MaildirManager {
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
-                    entries.push((filename, path));
+                    
+                    // Extract maildir_id from filename (remove flags if present)
+                    let maildir_id = filename.split(":2,").next().unwrap_or(&filename).to_string();
+                    
+                    // Filter by label if specified
+                    if let Some(ref filtered_ids) = filtered_maildir_ids {
+                        if !filtered_ids.contains(&maildir_id) {
+                            continue;
+                        }
+                    }
+                    
+                    entries.push((maildir_id, path));
                 }
             }
         }
@@ -557,7 +644,11 @@ impl MaildirManager {
             let raw_content = std::fs::read(&path)
                 .map_err(|e| Error::Other(format!("Failed to read maildir entry {}: {}", maildir_id_clone, e)))?;
 
-            match self.parse_rfc822_email(&raw_content, maildir_id.clone(), true) {
+            // Check database for UNREAD label to determine if email is unread
+            let is_unread = self.has_label(&maildir_id, "UNREAD")
+                .unwrap_or(false); // Default to false (read) if check fails
+
+            match self.parse_rfc822_email(&raw_content, maildir_id.clone(), is_unread, false) {
                 Ok(email) => {
                     // Save metadata to cache for future use
                     if let Err(e) = self.save_metadata(&maildir_id, &email.date, &email.subject, &email.from.email) {
@@ -604,7 +695,10 @@ impl MaildirManager {
                 let raw_content = std::fs::read(path)
                     .map_err(|e| Error::Other(format!("Failed to read {}: {}", maildir_id, e)))?;
 
-                return self.parse_rfc822_email(&raw_content, maildir_id.to_string(), true);
+                // Check database for UNREAD label
+                let is_unread = self.has_label(maildir_id, "UNREAD")
+                    .unwrap_or(false);
+                return self.parse_rfc822_email(&raw_content, maildir_id.to_string(), is_unread, true);
             }
         }
 

@@ -93,10 +93,24 @@ impl<'a> Widget for Inbox<'a> {
                     let from = fit_to_width(email.from.display_name(), from_max_width);
                     let subject = fit_to_width(&strip_emojis(&email.subject), subject_width);
                     let date = format_date(&email.date);
+                    
+                    // Style unread emails: white and bold, read emails: dark gray
+                    let from_style = if email.is_unread {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    
+                    let subject_style = if email.is_unread {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    
                     ListItem::new(Line::from(vec![
-                        Span::styled(from, Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)),
+                        Span::styled(from, from_style),
                         Span::raw(" "), // space between from and subject
-                        Span::styled(subject, Style::default().fg(Color::White)),
+                        Span::styled(subject, subject_style),
                         Span::raw(" "), // space between subject and date
                         Span::styled(format!("{:>width$}", date, width = date_width), Style::default().fg(Color::Green)),
                         Span::raw(" "), // space between date and border
@@ -111,7 +125,7 @@ impl<'a> Widget for Inbox<'a> {
             .highlight_style(
                 Style::default()
                     .fg(Color::Yellow)
-                    .bg(if is_active { Color::Blue } else { Color::DarkGray })
+                    .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
             );
     

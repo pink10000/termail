@@ -86,6 +86,7 @@ pub struct EmailMessage {
     pub body: String,
     pub mime_type: MimeType,
     pub email_attachments: Vec<EmailAttachment>,
+    pub is_unread: bool,
 }
 
 impl EmailMessage {
@@ -99,6 +100,7 @@ impl EmailMessage {
             body: String::new(),
             mime_type: Default::default(),
             email_attachments: Vec::new(),
+            is_unread: false,
         }
     }
 

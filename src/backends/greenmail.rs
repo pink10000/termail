@@ -170,8 +170,8 @@ impl GreenmailBackend {
     }
 
     /// Views emails from the local maildir
-    fn view_mailbox(&self, count: usize) -> Result<Vec<EmailMessage>, Error> {
-        let emails = self.maildir_manager.list_emails(count)?;
+    fn view_mailbox(&self, count: usize, _label: Option<&str>) -> Result<Vec<EmailMessage>, Error> {
+        let emails = self.maildir_manager.list_emails_by_label(count, _label)?;
         
         if emails.is_empty() {
             return Ok(Vec::new());
@@ -356,10 +356,10 @@ impl Backend for GreenmailBackend {
 
                 Ok(CommandResult::Empty)
             }
-            Command::ViewMailbox { count } => {
-                tracing::info!("Viewing mailbox, count: {}", count);
-
-                let emails = self.view_mailbox(count)?;
+            Command::ViewMailbox { count, label } => {
+                tracing::info!("Viewing mailbox, count: {}, label: {:?}", count, label);
+                let label_ref = label.as_deref();
+                let emails = self.view_mailbox(count, label_ref)?;
 
                 if emails.is_empty() {
                     Ok(CommandResult::Empty)
@@ -381,7 +381,7 @@ impl Backend for GreenmailBackend {
     fn requires_authentication(&self, cmd: &Command) -> Option<bool> {
         match cmd {
             Command::SyncFromCloud => Some(true),
-            Command::ViewMailbox { count: _ } => Some(false),
+            Command::ViewMailbox { count: _, label: _ } => Some(false),
             Command::SendEmail { to: _, subject: _, body: _ } => Some(true),
             // Command::FetchInbox { count: _ } => None, // TODO: deprecate fetch inbox for greenmail backend
             Command::ListLabels => Some(false),

@@ -31,6 +31,7 @@ pub enum AppEvent {
     SendEmail(EmailMessage),
     SyncFromCloud,
     ImageResizeRequest(ResizeRequest),
+    FolderChanged,
     Quit,
 }
 
